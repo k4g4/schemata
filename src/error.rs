@@ -25,7 +25,7 @@ pub enum Error {
 }
 
 impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Parse { kind } => write!(f, "(Inside {})", kind.description()),
             Self::Expected { char } => write!(f, "[Expected '{char}']"),
