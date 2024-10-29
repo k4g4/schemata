@@ -21,22 +21,24 @@ pub enum Error {
         kind: ErrorKind,
         external: Box<dyn error::Error>,
     },
-    Other,
+    Unexpected,
+    Other(String),
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Parse { kind } => write!(f, "(Inside {})", kind.description()),
+            Self::Parse { kind } => write!(f, "[Inside {}]", kind.description()),
             Self::Expected { char } => write!(f, "[Expected '{char}']"),
             Self::Appended { kind, error } => {
-                write!(f, "{error}\n(Inside {})", kind.description())
+                write!(f, "{error}\n[Inside {}]", kind.description())
             }
-            Self::WithContext { ctx, error } => write!(f, "[{ctx}]\n{error}"),
+            Self::WithContext { ctx, error } => write!(f, "[Failed during '{ctx}']\n{error}"),
             Self::External { kind, external } => {
-                write!(f, "[{external}]\n(Inside {})", kind.description())
+                write!(f, "[{external}]\n[Inside {}]", kind.description())
             }
-            Self::Other => write!(f, "[Unexpected error]"),
+            Self::Unexpected => write!(f, "[Unexpected error]"),
+            Self::Other(description) => write!(f, "[{description}]"),
         }
     }
 }

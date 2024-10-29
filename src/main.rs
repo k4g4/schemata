@@ -1,8 +1,8 @@
 mod error;
-mod eval;
+mod items;
+mod parse;
 
 use clap::Parser;
-use eval::eval;
 use std::{fs, path::PathBuf};
 
 #[derive(Parser)]
@@ -15,10 +15,13 @@ fn main() {
     let Args { input } = Args::parse();
 
     if let Ok(contents) = fs::read(&input) {
-        if let Err(error) = eval(&contents) {
-            eprintln!("{error}");
+        println!("Read {} bytes.\n", contents.len());
+        if let Err(error) = parse::repl(&contents) {
+            eprintln!("ERROR:\n{error}");
+        } else {
+            print!("-- Finished --");
         }
     } else {
-        eprintln!("Failed to read '{}'", input.display());
+        eprintln!("ERROR: Failed to read '{}'", input.display());
     }
 }
