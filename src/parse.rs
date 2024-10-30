@@ -4,12 +4,13 @@ use crate::{
 };
 use nom::{
     branch::alt,
-    character::complete::{char, multispace0},
-    combinator::value,
+    bytes::complete::{tag, take_till1},
+    character::complete::{char, multispace0, one_of},
+    combinator::{into, map_res, not, value},
     error::context,
     multi::many0,
     number::complete::double,
-    sequence::delimited,
+    sequence::{delimited, preceded},
     Parser,
 };
 use std::fmt::Write;
@@ -29,7 +30,7 @@ pub fn repl(mut input: &I) -> Result<(), Error> {
                 println!("{display}");
 
                 println!("Evaluated:");
-                match item.eval() {
+                match item.eval(&mut Default::default()) {
                     Ok(item) => println!("{item}"),
                     Err(error) => {
                         return Err(Error::WithContext {
@@ -52,13 +53,23 @@ pub fn repl(mut input: &I) -> Result<(), Error> {
 }
 
 fn expr(input: &I) -> ParseRes<Item> {
-    let item = alt((
-        context("list", list).map(Item::List),
+    let items = (
+        value(Item::Define, tag("define")),
+        double.map(Item::Num),
+        context("identifier", ident).map(Item::Ident),
         context("builtin", builtin).map(Item::Builtin),
-        context("number", double).map(Item::Num),
-    ));
-    let (input, item) = delimited(multispace0, item, multispace0)(input)?;
-    Ok((input, item))
+        context("list", list).map(Item::List),
+    );
+    delimited(multispace0, alt(items), multispace0)(input)
+}
+
+fn ident(input: &I) -> ParseRes<String> {
+    let delims = "();\"'`|[]{}";
+    let ident = preceded(
+        not(one_of::<_, _, Error>("#,").or(one_of(delims))),
+        take_till1(|c| delims.as_bytes().contains(&c)),
+    );
+    map_res(into(ident), String::from_utf8)(input)
 }
 
 fn builtin(input: &I) -> ParseRes<Builtin> {
