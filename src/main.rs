@@ -1,6 +1,7 @@
 mod error;
 mod items;
 mod parse;
+mod scope;
 
 use clap::Parser;
 use std::{fs, path::PathBuf};

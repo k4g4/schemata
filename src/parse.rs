@@ -1,37 +1,48 @@
 use crate::{
     error::Error,
-    items::{Builtin, Item},
+    items::{Item, Syn},
+    scope::Scope,
 };
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take_till1},
+    bytes::complete::take_till1,
     character::complete::{char, multispace0, one_of},
-    combinator::{into, map_res, not, value},
+    combinator::{into, map_res, not},
     error::context,
     multi::many0,
     number::complete::double,
     sequence::{delimited, preceded},
     Parser,
 };
-use std::fmt::Write;
+use smartstring::alias::String;
+use std::{fmt::Write, rc::Rc, str};
 
 type I = [u8];
 
 type ParseRes<'i, O> = nom::IResult<&'i I, O, Error>;
 
 pub fn repl(mut input: &I) -> Result<(), Error> {
+    let mut scope = Rc::new(Scope::default());
     let mut display = String::new();
+
     while !input.is_empty() {
-        input = match expr(input) {
-            Ok((input, item)) => {
+        (input, scope) = match expr(input) {
+            Ok((input, syn)) => {
                 println!("Expression:");
                 display.clear();
-                write!(&mut display, "{item}").map_err(|_| Error::Unexpected)?;
+                write!(&mut display, "{syn}").map_err(|_| Error::Unexpected)?;
                 println!("{display}");
 
-                println!("Evaluated:");
-                match item.eval(&mut Default::default()) {
-                    Ok(item) => println!("{item}"),
+                match syn.eval(scope) {
+                    Ok((Item::Func(_), _)) => {
+                        return Err(Error::Other("Cannot display a function".into()))
+                    }
+                    Ok((item, scope)) => {
+                        println!("Evaluated:");
+                        println!("{item}");
+
+                        (input, scope)
+                    }
                     Err(error) => {
                         return Err(Error::WithContext {
                             ctx: format!(
@@ -42,7 +53,6 @@ pub fn repl(mut input: &I) -> Result<(), Error> {
                         })
                     }
                 }
-                input
             }
             Err(nom::Err::Error(error) | nom::Err::Failure(error)) => return Err(error),
             Err(nom::Err::Incomplete(_)) => return Err(Error::Unexpected),
@@ -52,15 +62,13 @@ pub fn repl(mut input: &I) -> Result<(), Error> {
     Ok(())
 }
 
-fn expr(input: &I) -> ParseRes<Item> {
-    let items = (
-        value(Item::Define, tag("define")),
-        double.map(Item::Num),
-        context("identifier", ident).map(Item::Ident),
-        context("builtin", builtin).map(Item::Builtin),
-        context("list", list).map(Item::List),
+fn expr(input: &I) -> ParseRes<Syn> {
+    let syns = (
+        double.map(Syn::Num),
+        context("identifier", ident).map(Syn::Ident),
+        context("list", list).map(Syn::List),
     );
-    delimited(multispace0, alt(items), multispace0)(input)
+    delimited(multispace0, alt(syns), multispace0)(input)
 }
 
 fn ident(input: &I) -> ParseRes<String> {
@@ -69,17 +77,9 @@ fn ident(input: &I) -> ParseRes<String> {
         not(one_of::<_, _, Error>("#,").or(one_of(delims))),
         take_till1(|c| delims.as_bytes().contains(&c)),
     );
-    map_res(into(ident), String::from_utf8)(input)
+    into(map_res(ident, str::from_utf8))(input)
 }
 
-fn builtin(input: &I) -> ParseRes<Builtin> {
-    value(Builtin::Add, char('+'))
-        .or(value(Builtin::Sub, char('-')))
-        .or(value(Builtin::Mul, char('*')))
-        .or(value(Builtin::Div, char('/')))
-        .parse(input)
-}
-
-fn list(input: &I) -> ParseRes<Vec<Item>> {
+fn list(input: &I) -> ParseRes<Vec<Syn>> {
     delimited(char('('), many0(expr), char(')'))(input)
 }
