@@ -15,14 +15,14 @@ use nom::{
     Parser,
 };
 use smartstring::alias::String;
-use std::{fmt::Write, rc::Rc, str};
+use std::{fmt::Write, str};
 
 type I = [u8];
 
 type ParseRes<'i, O> = nom::IResult<&'i I, O, Error>;
 
 pub fn repl(mut input: &I) -> Result<(), Error> {
-    let mut scope = Rc::new(Scope::default());
+    let mut scope = Scope::new(None);
     let mut display = String::new();
 
     while !input.is_empty() {
@@ -34,7 +34,7 @@ pub fn repl(mut input: &I) -> Result<(), Error> {
                 println!("{display}");
 
                 match syn.eval(scope) {
-                    Ok((Item::Func(_), _)) => {
+                    Ok((Item::Func(..), _)) => {
                         return Err(Error::Other("Cannot display a function".into()))
                     }
                     Ok((item, scope)) => {

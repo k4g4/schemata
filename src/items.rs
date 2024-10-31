@@ -1,7 +1,7 @@
 use crate::{error::Error, scope::Scope};
 use smartstring::alias::String;
 use std::{
-    fmt, mem,
+    fmt,
     ops::{Add, Div, Mul, Sub},
     rc::Rc,
 };
@@ -14,7 +14,7 @@ pub enum Syn {
 }
 
 impl Syn {
-    pub fn eval(self, _scope: Rc<Scope>) -> Result<(Item, Rc<Scope>), Error> {
+    pub fn eval(self, scope: Rc<Scope>) -> Result<(Item, Rc<Scope>), Error> {
         todo!()
     }
 }
@@ -47,43 +47,71 @@ impl fmt::Display for Syn {
 }
 
 #[derive(Clone, Debug)]
+enum List {
+    Nil,
+    Cons { item: Item, next: Rc<List> },
+}
+
+struct ListIter<'a>(&'a List);
+
+impl<'a> Iterator for ListIter<'a> {
+    type Item = &'a Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let List::Cons { item, next } = self.0 {
+            *self = Self(next.as_ref());
+            Some(item)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum Item {
     Num(f64),
     Func(Func),
     Builtin(Builtin),
-    List(Vec<Item>),
+    List(Rc<List>),
 }
 
 impl Item {
     fn eval(self, scope: &mut Scope) -> Result<Self, Error> {
-        let Self::List(mut list) = self else {
-            return Ok(self);
-        };
-        let Some((head, tail)) = list.split_first_mut() else {
-            return Ok(Default::default());
-        };
-        *head = mem::take(head).eval(scope)?;
-        match head {
-            Self::Define => match tail {
-                [] => Err(Error::Other("Empty define".into())),
-                [Self::Ident(ident), value] => {
-                    let value = mem::take(value).eval(scope)?;
-                    todo!()
+        if let Self::List(list) = &self {
+            if let List::Cons { item, next } = list.as_ref() {
+                match item {
+                    Self::Func(func) => func.eval(&next),
+                    Self::Builtin(builtin) => builtin.eval(&next),
+                    _ => Ok(self),
                 }
-                [Self::List(signature), _, ..] => todo!(),
-                _ => Err(Error::Other("Invalid define".into())),
-            },
-            _ => {
-                for item in &mut *tail {
-                    *item = mem::take(item).eval(scope)?;
-                }
-                if let Self::Builtin(builtin) = head {
-                    builtin.eval(tail)
-                } else {
-                    Ok(Self::List(list))
-                }
+            } else {
+                Ok(self)
             }
+        } else {
+            Ok(self)
         }
+        // *head = mem::take(head).eval(scope)?;
+        // match head {
+        //     Self::Define => match tail {
+        //         [] => Err(Error::Other("Empty define".into())),
+        //         [Self::Ident(ident), value] => {
+        //             let value = mem::take(value).eval(scope)?;
+        //             todo!()
+        //         }
+        //         [Self::List(signature), _, ..] => todo!(),
+        //         _ => Err(Error::Other("Invalid define".into())),
+        //     },
+        //     _ => {
+        //         for item in &mut *tail {
+        //             *item = mem::take(item).eval(scope)?;
+        //         }
+        //         if let Self::Builtin(builtin) = head {
+        //             builtin.eval(tail)
+        //         } else {
+        //             Ok(Self::List(list))
+        //         }
+        //     }
+        // }
     }
 }
 
@@ -102,14 +130,17 @@ impl fmt::Display for Item {
             Self::Num(num) => writeln!(f, "{num}"),
             Self::Func(_) => Ok(()),
             Self::Builtin(builtin) => writeln!(f, "{builtin}"),
-            Self::List(items) if items.is_empty() => f.write_str("()\n"),
-            Self::List(items) => {
-                f.write_str("(\n")?;
-                for item in items {
-                    write!(f, "{item:width$}", width = width + 1)?;
+            Self::List(list) => {
+                if matches!(**list, List::Nil) {
+                    writeln!(f, "()")
+                } else {
+                    f.write_str("(\n")?;
+                    for item in ListIter(list) {
+                        write!(f, "{item:width$}", width = width + 1)?;
+                    }
+                    indent(f)?;
+                    writeln!(f, ")")
                 }
-                indent(f)?;
-                f.write_str(")\n")
             }
         }
     }
@@ -124,36 +155,45 @@ enum Builtin {
 }
 
 impl Builtin {
-    fn eval(self, mut tail: impl Iterator<Item = Item>) -> Result<Item, Error> {
+    fn eval(&self, tail: &List) -> Result<Item, Error> {
+        if matches!(self, Self::Div) && ListIter(tail).any(|item| matches!(item, Item::Num(0.0))) {
+            return Err(Error::Other("Can't divide by zero!".into()));
+        };
+
         if matches!(self, Self::Add | Self::Sub | Self::Mul | Self::Div) {
-            if matches!(self, Self::Div) && tail.any(|item| matches!(item, Item::Num(0.0))) {
-                return Err(Error::Other("Can't divide by zero!".into()));
-            };
-            if !tail.all(|item| matches!(item, Item::Num(_))) {
+            if !ListIter(tail).all(|item| matches!(item, Item::Num(_))) {
                 return Err(Error::Other(format!("{self} can't operate on non-number")));
             }
-            let head = tail.next();
-            if let Some(Item::Num(head)) = head {
-                let op = match self {
-                    Self::Add => <_ as Add>::add,
-                    Self::Sub => <_ as Sub>::sub,
-                    Self::Mul => <_ as Mul>::mul,
-                    Self::Div => <_ as Div>::div,
-                };
-                let get_num = |item| {
-                    if let Item::Num(n) = item {
+
+            let reduced = ListIter(tail)
+                .flat_map(|item| {
+                    if let &Item::Num(n) = item {
                         Some(n)
                     } else {
                         None
                     }
-                };
-                Ok(Item::Num(tail.flat_map(get_num).fold(head, op)))
-            } else if matches!(self, Self::Add | Self::Mul) {
-                Ok(Item::Num(0.0))
+                })
+                .reduce(match self {
+                    Self::Add => <_ as Add>::add,
+                    Self::Sub => <_ as Sub>::sub,
+                    Self::Mul => <_ as Mul>::mul,
+                    Self::Div => <_ as Div>::div,
+                });
+
+            if let Some(reduced) = reduced {
+                if matches!(self, Self::Div) {
+                    Ok(Item::Num(1.0 / reduced))
+                } else {
+                    Ok(Item::Num(reduced))
+                }
             } else {
-                Err(Error::Other(format!(
-                    "Wrong number of arguments for {self}"
-                )))
+                match self {
+                    Self::Add => Ok(Item::Num(0.0)),
+                    Self::Mul => Ok(Item::Num(1.0)),
+                    Self::Sub | Self::Div => Err(Error::Other(format!(
+                        "Wront number of arguments for {self}"
+                    ))),
+                }
             }
         } else {
             unreachable!("Unsupported builtin: {self}")
@@ -176,5 +216,23 @@ impl fmt::Display for Builtin {
 struct Func {
     params: Vec<String>,
     scope: Rc<Scope>,
-    body: Vec<Syn>,
+    body: Syn,
+}
+
+impl Func {
+    fn eval(&self, tail: &List) -> Result<Item, Error> {
+        let mut iter = ListIter(tail);
+        let mut scope = Scope::new(Some(self.scope.clone()));
+        for (i, param) in self.params.iter().enumerate() {
+            if let Some(item) = iter.next() {
+                scope = scope.add(param.clone(), item.clone());
+            } else {
+                return Err(Error::Other(format!(
+                    "Expected {} param(s), got {i}",
+                    self.params.len()
+                )));
+            }
+        }
+        todo!()
+    }
 }
