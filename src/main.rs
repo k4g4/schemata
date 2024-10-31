@@ -1,7 +1,10 @@
 mod error;
-mod items;
+mod idents;
+mod item;
+mod list;
 mod parse;
 mod scope;
+mod syn;
 
 use clap::Parser;
 use std::{fs, path::PathBuf};
