@@ -1,9 +1,8 @@
 use crate::{
     error::Error,
-    idents::*,
-    list::{List, Node},
+    idents,
     scope::Scope,
-    syn::Syn,
+    syn::{Defs, Syn},
 };
 use std::{
     fmt,
@@ -14,26 +13,42 @@ use std::{
 #[derive(Clone, Debug)]
 pub enum Item<'src> {
     Num(f64),
-    Func(Func<'src>),
-    Builtin(Builtin),
-    Define,
-    List(List<'src>),
+    List(Option<Rc<List<'src>>>),
+    Proc(Proc<'src>),
+    Defined,
 }
 
 impl<'src> Item<'src> {
-    pub fn eval(self, scope: Rc<Scope<'src>>) -> Result<(Self, Rc<Scope>), Error> {
+    pub fn nil() -> Self {
+        Self::List(None)
+    }
+
+    pub fn cons(head: Item<'src>, tail: Item<'src>) -> Self {
+        Self::List(Some(Rc::new(List { head, tail })))
+    }
+
+    fn args(&self) -> ProcArgs<'_, 'src> {
+        ProcArgs(if let Self::List(list) = self {
+            list.as_deref()
+        } else {
+            None
+        })
+    }
+
+    pub fn apply(self) -> Result<Self, Error> {
         if let Self::List(list) = &self {
-            if let Some(Node { head, tail }) = list.as_ref() {
-                match head {
-                    Self::Func(func) => func.eval(tail).map(|item| (item, scope)),
-                    Self::Builtin(builtin) => builtin.eval(&tail, scope),
-                    _ => Ok((self, scope)),
-                }
-            } else {
-                Ok((self, scope))
+            match list.as_deref() {
+                Some(List {
+                    head: Self::Proc(proc),
+                    ..
+                }) => proc.apply(self.args()),
+
+                Some(List { head, .. }) => Err(Error::Other(format!("{head} is not a procedure"))),
+
+                None => Err(Error::Other("Empty list cannot be evaluated".into())),
             }
         } else {
-            Ok((self, scope))
+            Ok(self)
         }
     }
 }
@@ -51,19 +66,34 @@ impl fmt::Display for Item<'_> {
 
         match self {
             Self::Num(num) => writeln!(f, "{num}"),
-            Self::Func(_) => writeln!(f, "<function>"),
-            Self::Builtin(builtin) => writeln!(f, "{builtin}"),
-            Self::Define => writeln!(f, "{IDENT_DEFINE}"),
+            Self::Proc(Proc::Arith(arith)) => writeln!(f, "<{arith}>"),
+            Self::Proc(_) => writeln!(f, "<function>"),
+            Self::Defined => writeln!(f, "<{}>", idents::DEFINE),
             Self::List(list) => {
-                if list.is_empty() {
-                    writeln!(f, "()")
-                } else {
+                if let Some(List { head, tail }) = list.as_deref() {
                     writeln!(f, "(")?;
-                    for item in list.iter() {
-                        write!(f, "{item:width$}", width = width + 1)?;
+
+                    let (mut head, mut tail) = (head, tail);
+                    loop {
+                        write!(f, "{head:width$}", width = width + 1)?;
+                        (head, tail) = match tail {
+                            Self::List(Some(list)) => (&list.head, &list.tail),
+
+                            Self::List(_) => break,
+
+                            _ => {
+                                writeln!(f, ".")?;
+                                indent(f)?;
+                                write!(f, "{tail:width$}", width = width + 1)?;
+                                break;
+                            }
+                        };
                     }
+
                     indent(f)?;
                     writeln!(f, ")")
+                } else {
+                    writeln!(f, "()")
                 }
             }
         }
@@ -71,108 +101,135 @@ impl fmt::Display for Item<'_> {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub enum Builtin {
+struct ProcArgs<'a, 'src>(Option<&'a List<'src>>);
+
+impl<'a, 'src> Iterator for ProcArgs<'a, 'src> {
+    type Item = &'a Item<'src>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.map(|List { head, tail }| {
+            if let Item::List(list) = tail {
+                self.0 = list.as_deref();
+            } else {
+                self.0 = None;
+            }
+            head
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct List<'src> {
+    head: Item<'src>,
+    tail: Item<'src>,
+}
+
+#[derive(Clone, Debug)]
+pub enum Proc<'src> {
+    Arith(Arith),
+    User {
+        params: Rc<[&'src str]>,
+        scope: Rc<Scope<'src>>,
+        body: &'src Syn<'src>,
+    },
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum Arith {
     Add,
     Sub,
     Mul,
     Div,
 }
 
-impl Builtin {
-    fn eval<'src>(
-        &self,
-        tail: &List,
-        scope: Rc<Scope<'src>>,
-    ) -> Result<(Item<'src>, Rc<Scope<'src>>), Error> {
-        if matches!(self, Self::Div) && tail.iter().any(|item| matches!(item, Item::Num(0.0))) {
-            return Err(Error::Other("Can't divide by zero!".into()));
-        };
+impl<'src> Proc<'src> {
+    fn apply(&self, args: ProcArgs<'_, 'src>) -> Result<Item<'src>, Error> {
+        match self {
+            Proc::Arith(arith) => {
+                if matches!(arith, Arith::Div) && { args }
+                    .any(|item| matches!(item, Item::Num(0.0)))
+                {
+                    return Err(Error::Other("Can't divide by zero!".into()));
+                };
 
-        if matches!(self, Self::Add | Self::Sub | Self::Mul | Self::Div) {
-            if !tail.iter().all(|item| matches!(item, Item::Num(_))) {
-                return Err(Error::Other(format!("{self} can't operate on non-number")));
-            }
+                if !{ args }.all(|item| matches!(item, Item::Num(_))) {
+                    return Err(Error::Other(format!(
+                        "<{arith}> can't operate on non-number"
+                    )));
+                }
 
-            let reduced = tail
-                .iter()
-                .flat_map(|item| {
-                    if let &Item::Num(n) = item {
-                        Some(n)
+                let reduced = args
+                    .flat_map(|item| {
+                        if let &Item::Num(n) = item {
+                            Some(n)
+                        } else {
+                            None
+                        }
+                    })
+                    .reduce(match arith {
+                        Arith::Add => <_ as Add>::add,
+                        Arith::Sub => <_ as Sub>::sub,
+                        Arith::Mul => <_ as Mul>::mul,
+                        Arith::Div => <_ as Div>::div,
+                    });
+
+                if let Some(reduced) = reduced {
+                    if matches!(arith, Arith::Div) {
+                        Ok(Item::Num(1.0 / reduced))
                     } else {
-                        None
+                        Ok(Item::Num(reduced))
                     }
-                })
-                .reduce(match self {
-                    Self::Add => <_ as Add>::add,
-                    Self::Sub => <_ as Sub>::sub,
-                    Self::Mul => <_ as Mul>::mul,
-                    Self::Div => <_ as Div>::div,
-                });
-
-            if let Some(reduced) = reduced {
-                if matches!(self, Self::Div) {
-                    Ok((Item::Num(1.0 / reduced), scope))
                 } else {
-                    Ok((Item::Num(reduced), scope))
-                }
-            } else {
-                match self {
-                    Self::Add => Ok((Item::Num(0.0), scope)),
-                    Self::Mul => Ok((Item::Num(1.0), scope)),
-                    Self::Sub | Self::Div => Err(Error::Other(format!(
-                        "Wront number of arguments for {self}"
-                    ))),
+                    match arith {
+                        Arith::Add => Ok(Item::Num(0.0)),
+                        Arith::Mul => Ok(Item::Num(1.0)),
+                        Arith::Sub | Arith::Div => Err(Error::Other(format!(
+                            "Wront number of arguments for <{arith}>"
+                        ))),
+                    }
                 }
             }
-        } else {
-            unreachable!("Unsupported builtin: {self}")
+
+            Proc::User {
+                params,
+                scope,
+                body,
+            } => {
+                let mut args = args;
+                let scope = params.iter().enumerate().try_fold(
+                    Scope::new_local(scope.clone()),
+                    |scope, (i, param)| {
+                        if let Some(item) = args.next() {
+                            Ok(scope.add(param, item.clone()))
+                        } else {
+                            Err(Error::Other(format!(
+                                "Expected {} param(s), got {i}",
+                                params.len()
+                            )))
+                        }
+                    },
+                )?;
+
+                if !args.next().is_none() {
+                    Err(Error::Other(format!(
+                        "Too many params, expected {}",
+                        params.len()
+                    )))
+                } else {
+                    body.eval(scope, Defs::Allowed).map(|(item, _)| item)
+                }
+            }
         }
     }
 }
 
-impl fmt::Display for Builtin {
+impl fmt::Display for Arith {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Builtin::Add => IDENT_ADD,
-            Builtin::Sub => IDENT_SUB,
-            Builtin::Mul => IDENT_MUL,
-            Builtin::Div => IDENT_DIV,
+            Arith::Add => idents::ADD,
+            Arith::Sub => idents::SUB,
+            Arith::Mul => idents::MUL,
+            Arith::Div => idents::DIV,
         })
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct Func<'src> {
-    params: &'src [&'src str],
-    scope: Rc<Scope<'src>>,
-    body: &'src Syn<'src>,
-}
-
-impl<'src> Func<'src> {
-    fn eval(&self, tail: &List<'src>) -> Result<Item<'src>, Error> {
-        let mut iter = tail.iter();
-
-        let scope = self.params.iter().enumerate().try_fold(
-            Scope::new_local(self.scope.clone()),
-            |scope, (i, param)| {
-                if let Some(item) = iter.next() {
-                    Ok(scope.add(param, item.clone()))
-                } else {
-                    Err(Error::Other(format!(
-                        "Expected {} param(s), got {i}",
-                        self.params.len()
-                    )))
-                }
-            },
-        )?;
-
-        if !iter.next().is_none() {
-            Err(Error::Other(format!(
-                "Too many params, expected {}",
-                self.params.len()
-            )))
-        } else {
-            self.body.interpret(&scope)
-        }
     }
 }

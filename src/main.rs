@@ -1,7 +1,6 @@
 mod error;
 mod idents;
 mod item;
-mod list;
 mod parse;
 mod scope;
 mod syn;

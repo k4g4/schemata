@@ -1,9 +1,14 @@
-use crate::{error::Error, scope::Scope, syn::Syn};
+use crate::{
+    error::Error,
+    idents,
+    scope::Scope,
+    syn::{Defs, Syn},
+};
 use nom::{
     branch::alt,
-    bytes::complete::take_till1,
+    bytes::complete::{tag, take_till1},
     character::complete::{char, multispace0, one_of},
-    combinator::{all_consuming, map_res, not},
+    combinator::{all_consuming, map_res, not, value},
     error::context,
     multi::many0,
     number::complete::double,
@@ -29,7 +34,7 @@ pub fn repl(input: &I) -> Result<(), Error> {
         println!("Expression:");
         println!("{syn}");
 
-        let (item, new_scope) = syn.interpret(&scope)?.eval(scope)?;
+        let (item, new_scope) = syn.eval(scope, Defs::Allowed)?;
         scope = new_scope;
 
         println!("Evaluated:");
@@ -46,8 +51,9 @@ fn syns(input: &I) -> ParseRes<Vec<Syn>> {
 fn expr(input: &I) -> ParseRes<Syn> {
     let syns = (
         double.map(Syn::Num),
+        value(Syn::Define, tag(idents::DEFINE)),
         context("identifier", ident).map(Syn::Ident),
-        context("list", list).map(Syn::List),
+        context("list", list).map(Syn::Group),
     );
     delimited(multispace0, alt(syns), multispace0)(input)
 }

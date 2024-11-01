@@ -1,54 +1,107 @@
 use crate::{
     error::Error,
-    idents::*,
-    item::{Builtin, Item},
-    list::List,
+    idents,
+    item::{Arith, Item, Proc},
     scope::Scope,
 };
-use std::fmt;
+use std::{fmt, rc::Rc};
 
 #[derive(Clone, Debug)]
 pub enum Syn<'src> {
     Num(f64),
+    Define,
     Ident(&'src str),
-    List(Vec<Syn<'src>>),
+    Group(Vec<Syn<'src>>),
+}
+
+#[derive(PartialEq, Copy, Clone, Debug)]
+pub enum Defs {
+    Allowed,
+    NotAllowed,
 }
 
 impl<'src> Syn<'src> {
-    pub fn interpret(&self, scope: &Scope<'src>) -> Result<Item<'src>, Error> {
+    pub fn eval(
+        &'src self,
+        scope: Rc<Scope<'src>>,
+        defs: Defs,
+    ) -> Result<(Item<'src>, Rc<Scope<'src>>), Error> {
         match self {
-            &Syn::Num(n) => Ok(Item::Num(n)),
-            Syn::Ident(IDENT_DEFINE) => Ok(Item::Define),
-            &Syn::Ident(ident) => {
+            &Self::Num(n) => Ok((Item::Num(n), scope)),
+
+            Self::Define => Err(Error::Other("Unexpected 'define'".into())),
+
+            &Self::Ident(ident) => {
                 if let Some(lookup) = scope.lookup(ident) {
-                    Ok(lookup)
+                    Ok((lookup, scope))
                 } else {
                     let builtin = match ident {
-                        IDENT_ADD => Builtin::Add,
-                        IDENT_SUB => Builtin::Sub,
-                        IDENT_MUL => Builtin::Mul,
-                        IDENT_DIV => Builtin::Div,
+                        idents::ADD => Arith::Add,
+                        idents::SUB => Arith::Sub,
+                        idents::MUL => Arith::Mul,
+                        idents::DIV => Arith::Div,
                         _ => {
-                            return Err(Error::Other(format!("Failed to find '{ident}' in scope")));
+                            return Err(Error::Other(format!(
+                                "Failed to find definition for '{ident}'"
+                            )));
                         }
                     };
-                    Ok(Item::Builtin(builtin))
+                    Ok((Item::Proc(Proc::Arith(builtin)), scope))
                 }
             }
-            Syn::List(list) => {
-                if let Some((head, tail)) = list.split_first() {
-                    match head.interpret(scope)? {
-                        Item::Num(_) => todo!(),
-                        Item::Func(func) => todo!(),
-                        Item::Builtin(builtin) => todo!(),
-                        Item::Define => todo!(),
-                        Item::List(list) => todo!(),
+
+            Self::Group(group) => match group.as_slice() {
+                [] => Ok((Item::nil(), scope)),
+
+                [Self::Define, ..] if defs == Defs::NotAllowed => {
+                    Err(Error::Other(format!("Ill-placed '{}'", idents::DEFINE)))
+                }
+
+                [Self::Define, Self::Ident(ident), def] => {
+                    let (item, scope) = def.eval(scope, Defs::NotAllowed)?;
+                    Ok((Item::Defined, scope.add(ident, item)))
+                }
+
+                [Self::Define, Self::Group(signature), body] => match signature.as_slice() {
+                    [Self::Ident(ident), params @ ..] => {
+                        let params = params
+                            .iter()
+                            .map(|param| {
+                                if let &Syn::Ident(ident) = param {
+                                    Ok(ident)
+                                } else {
+                                    Err(Error::Other(format!(
+                                        "'{param}' is not a valid parameter name"
+                                    )))
+                                }
+                            })
+                            .collect::<Result<_, _>>()?;
+
+                        Ok((
+                            Item::Defined,
+                            scope.clone().add(
+                                ident,
+                                Item::Proc(Proc::User {
+                                    params,
+                                    scope: Scope::new_local(scope),
+                                    body,
+                                }),
+                            ),
+                        ))
                     }
-                    todo!()
-                } else {
-                    Ok(Item::List(List::nil()))
-                }
-            }
+
+                    _ => Err(Error::Other("Malformed signature".into())),
+                },
+
+                [Self::Define, ..] => Err(Error::Other(format!("Malformed '{}'", idents::DEFINE))),
+
+                _ => group
+                    .iter()
+                    .try_rfold((Item::nil(), scope), |(tail, scope), syn| {
+                        syn.eval(scope, Defs::NotAllowed)
+                            .map(|(head, scope)| (Item::cons(head, tail), scope))
+                    }),
+            },
         }
     }
 }
@@ -66,9 +119,10 @@ impl fmt::Display for Syn<'_> {
 
         match self {
             Self::Num(num) => writeln!(f, "{num}"),
+            Self::Define => writeln!(f, "define"),
             Self::Ident(ident) => writeln!(f, "{ident}"),
-            Self::List(items) if items.is_empty() => f.write_str("()\n"),
-            Self::List(items) => {
+            Self::Group(items) if items.is_empty() => f.write_str("()\n"),
+            Self::Group(items) => {
                 f.write_str("(\n")?;
                 for item in items {
                     write!(f, "{item:width$}", width = width + 1)?;
