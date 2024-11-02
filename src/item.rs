@@ -1,9 +1,9 @@
 use crate::{
-    idents,
+    globals, idents,
     scope::Scope,
     syn::{Defs, Syn},
 };
-use anyhow::{bail, ensure, Result};
+use anyhow::{bail, ensure, Context, Result};
 use std::{
     fmt,
     ops::{Add, Div, Mul, Sub},
@@ -295,12 +295,23 @@ impl<'src> Proc<'src> {
                 scope,
                 body,
             } => {
+                let debug = globals::debug();
+
+                if debug {
+                    eprint!("{}(", name.unwrap_or(idents::LAMBDA));
+                }
                 let scope = {
                     let mut args = args;
                     let scope = params.iter().enumerate().try_fold(
                         Scope::new_local(scope.clone()),
                         |scope, (i, param)| {
                             if let Some(item) = args.next() {
+                                if debug {
+                                    eprint!("{param}: {item}");
+                                    if i != params.len() - 1 {
+                                        eprint!(", ");
+                                    }
+                                }
                                 Ok(scope.add(param, item.clone()))
                             } else {
                                 bail!("Expected {} parameter(s), got {i}", params.len());
@@ -319,11 +330,21 @@ impl<'src> Proc<'src> {
                         scope
                     }
                 };
+                if debug {
+                    eprintln!(")");
+                }
 
                 body.iter()
                     .try_fold((Item::nil(), scope), |(_, scope), syn| {
                         syn.eval(scope, Defs::Allowed)
-                            .and_then(|(item, scope)| Ok((item.apply()?, scope)))
+                            .with_context(|| format!("[while evaluating {self}]"))
+                            .and_then(|(item, scope)| {
+                                Ok((
+                                    item.apply()
+                                        .with_context(|| format!("[while applying {self}]"))?,
+                                    scope,
+                                ))
+                            })
                     })
                     .and_then(|(item, _)| {
                         if let Item::Defined = item {
@@ -342,7 +363,7 @@ impl fmt::Display for Proc<'_> {
         match self {
             Self::Arith(arith) => write!(f, "<({arith})>"),
             Self::Cmp(cmp) => write!(f, "<({cmp})'>"),
-            Self::User { name: None, .. } => write!(f, "<lambda>"),
+            Self::User { name: None, .. } => write!(f, "<{}>", idents::LAMBDA),
             Self::User {
                 name: Some(name), ..
             } => write!(f, "<proc '{name}'>"),

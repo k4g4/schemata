@@ -3,7 +3,7 @@ use crate::{
     item::{Arith, Cmp, Item, Proc, Token},
     scope::Scope,
 };
-use anyhow::{bail, Result};
+use anyhow::{bail, ensure, Result};
 use std::{fmt, rc::Rc};
 
 #[derive(Clone, Debug)]
@@ -186,25 +186,14 @@ impl<'src> Syn<'src> {
                 [Self::Reserved(Reserved::Cond), ..] => bail!("Malformed '{}'", idents::COND),
 
                 [Self::Reserved(Reserved::If), syns @ ..] => {
-                    let (cond, conseq, alt, scope) = match syns.len() {
-                        2 => {
-                            let (cond, scope) = syns[0].eval(scope, Defs::NotAllowed)?;
-                            let (conseq, scope) = syns[1].eval(scope, Defs::NotAllowed)?;
-                            (cond, conseq, None, scope)
-                        }
-                        3 => {
-                            let (cond, scope) = syns[0].eval(scope, Defs::NotAllowed)?;
-                            let (conseq, scope) = syns[1].eval(scope, Defs::NotAllowed)?;
-                            let (alt, scope) = syns[2].eval(scope, Defs::NotAllowed)?;
-                            (cond, conseq, Some(alt), scope)
-                        }
-                        _ => bail!("Malformed '{}'", idents::IF),
-                    };
+                    ensure!(matches!(syns.len(), 2 | 3), "Malformed '{}'", idents::IF);
+                    let (cond, scope) = syns[0].eval(scope, Defs::NotAllowed)?;
                     let cond = cond.apply()?;
-
                     if cond.is_truthy() {
+                        let (conseq, scope) = syns[1].eval(scope, Defs::NotAllowed)?;
                         Ok((conseq.apply()?, scope))
-                    } else if let Some(alt) = alt {
+                    } else if let Some(alt) = syns.get(2) {
+                        let (alt, scope) = alt.eval(scope, Defs::NotAllowed)?;
                         Ok((alt.apply()?, scope))
                     } else {
                         bail!(

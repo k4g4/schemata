@@ -18,3 +18,4 @@ pub const ELSE: &str = "else";
 pub const IF: &str = "if";
 pub const AND: &str = "and";
 pub const OR: &str = "or";
+pub const LAMBDA: &str = "lambda";
