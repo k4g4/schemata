@@ -338,13 +338,6 @@ impl<'src> Proc<'src> {
                     .try_fold((Item::nil(), scope), |(_, scope), syn| {
                         syn.eval(scope, Defs::Allowed)
                             .with_context(|| format!("[while evaluating {self}]"))
-                            .and_then(|(item, scope)| {
-                                Ok((
-                                    item.apply()
-                                        .with_context(|| format!("[while applying {self}]"))?,
-                                    scope,
-                                ))
-                            })
                     })
                     .and_then(|(item, _)| {
                         if let Item::Defined = item {
