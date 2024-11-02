@@ -22,24 +22,25 @@ type I = [u8];
 type ParseRes<'src, O> = nom::IResult<&'src I, O, Error>;
 
 pub fn repl(input: &I) -> Result<(), Error> {
-    let mut scope = Scope::new_global();
-
     let syns = match syns(input) {
         Ok((_, syns)) => syns,
         Err(nom::Err::Error(error) | nom::Err::Failure(error)) => return Err(error),
         Err(nom::Err::Incomplete(_)) => return Err(Error::Unexpected),
     };
 
-    for syn in &syns {
+    syns.iter().try_fold(Scope::new_global(), |scope, syn| {
         println!("Expression:");
         println!("{syn}");
+        println!();
 
-        let (item, new_scope) = syn.eval(scope, Defs::Allowed)?;
-        scope = new_scope;
+        let (item, scope) = syn.eval(scope, Defs::Allowed)?;
 
         println!("Evaluated:");
         println!("{item}");
-    }
+        println!();
+
+        Ok(scope)
+    })?;
 
     Ok(())
 }
@@ -59,7 +60,7 @@ fn expr(input: &I) -> ParseRes<Syn> {
 }
 
 fn ident(input: &I) -> ParseRes<&str> {
-    let delims = "();\"'`|[]{}";
+    let delims = "();\"'`|[]{} ";
     let ident = preceded(
         not(one_of::<_, _, Error>("#,").or(one_of(delims))),
         take_till1(|c| delims.as_bytes().contains(&c)),
@@ -68,5 +69,9 @@ fn ident(input: &I) -> ParseRes<&str> {
 }
 
 fn list(input: &I) -> ParseRes<Vec<Syn>> {
-    delimited(char('('), many0(expr), char(')'))(input)
+    delimited(
+        char('(').and(multispace0),
+        many0(expr),
+        multispace0.and(char(')')),
+    )(input)
 }

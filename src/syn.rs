@@ -29,13 +29,13 @@ impl<'src> Syn<'src> {
         match self {
             &Self::Num(n) => Ok((Item::Num(n), scope)),
 
-            Self::Define => Err(Error::Other("Unexpected 'define'".into())),
+            Self::Define => Err(Error::Other(format!("Unexpected '{}'", idents::DEFINE))),
 
             &Self::Ident(ident) => {
                 if let Some(lookup) = scope.lookup(ident) {
                     Ok((lookup, scope))
                 } else {
-                    let builtin = match ident {
+                    let arith = match ident {
                         idents::ADD => Arith::Add,
                         idents::SUB => Arith::Sub,
                         idents::MUL => Arith::Mul,
@@ -46,7 +46,7 @@ impl<'src> Syn<'src> {
                             )));
                         }
                     };
-                    Ok((Item::Proc(Proc::Arith(builtin)), scope))
+                    Ok((Item::Proc(Proc::Arith(arith)), scope))
                 }
             }
 
@@ -77,13 +77,15 @@ impl<'src> Syn<'src> {
                             })
                             .collect::<Result<_, _>>()?;
 
+                        //TODO
                         Ok((
                             Item::Defined,
                             scope.clone().add(
                                 ident,
                                 Item::Proc(Proc::User {
+                                    name: ident,
                                     params,
-                                    scope: Scope::new_local(scope),
+                                    scope,
                                     body,
                                 }),
                             ),
@@ -100,7 +102,8 @@ impl<'src> Syn<'src> {
                     .try_rfold((Item::nil(), scope), |(tail, scope), syn| {
                         syn.eval(scope, Defs::NotAllowed)
                             .map(|(head, scope)| (Item::cons(head, tail), scope))
-                    }),
+                    })
+                    .and_then(|(item, scope)| Ok((item.apply()?, scope))),
             },
         }
     }
@@ -111,24 +114,24 @@ impl fmt::Display for Syn<'_> {
         let width = f.width().unwrap_or(0);
         let indent = |f: &mut fmt::Formatter| {
             for _ in 0..width {
-                f.write_str("   ")?;
+                write!(f, "   ")?;
             }
             Ok(())
         };
         indent(f)?;
 
         match self {
-            Self::Num(num) => writeln!(f, "{num}"),
-            Self::Define => writeln!(f, "define"),
-            Self::Ident(ident) => writeln!(f, "{ident}"),
-            Self::Group(items) if items.is_empty() => f.write_str("()\n"),
+            Self::Num(num) => num.fmt(f),
+            Self::Define => write!(f, "{}", idents::DEFINE),
+            Self::Ident(ident) => ident.fmt(f),
+            Self::Group(items) if items.is_empty() => write!(f, "()"),
             Self::Group(items) => {
-                f.write_str("(\n")?;
+                writeln!(f, "(")?;
                 for item in items {
-                    write!(f, "{item:width$}", width = width + 1)?;
+                    writeln!(f, "{item:width$}", width = width + 1)?;
                 }
                 indent(f)?;
-                f.write_str(")\n")
+                write!(f, ")")
             }
         }
     }

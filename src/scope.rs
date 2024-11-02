@@ -12,8 +12,8 @@ pub enum Scope<'src> {
         defs: RefCell<Defs<'src>>,
     },
     Local {
-        defs: Defs<'src>,
         parent: Rc<Scope<'src>>,
+        defs: Defs<'src>,
     },
 }
 
@@ -26,15 +26,15 @@ impl<'src> Scope<'src> {
 
     pub fn new_local(parent: Rc<Scope<'src>>) -> Rc<Self> {
         Rc::new(Self::Local {
-            defs: Default::default(),
             parent,
+            defs: Default::default(),
         })
     }
 
     pub fn lookup(&self, ident: &str) -> Option<Item<'src>> {
         match self {
-            Scope::Global { defs } => defs.borrow().get(ident).cloned(),
-            Scope::Local { defs, parent } => {
+            Self::Global { defs } => defs.borrow().get(ident).cloned(),
+            Self::Local { defs, parent } => {
                 defs.get(ident).cloned().or_else(|| parent.lookup(ident))
             }
         }
@@ -42,11 +42,11 @@ impl<'src> Scope<'src> {
 
     pub fn add(mut self: Rc<Self>, ident: &'src str, item: Item<'src>) -> Rc<Self> {
         match self.as_ref() {
-            Scope::Global { defs } => {
+            Self::Global { defs } => {
                 defs.borrow_mut().insert(ident, item);
             }
-            Scope::Local { .. } => match Rc::make_mut(&mut self) {
-                Scope::Local { defs, .. } => {
+            Self::Local { .. } => match Rc::make_mut(&mut self) {
+                Self::Local { defs, .. } => {
                     defs.insert(ident, item);
                 }
                 _ => unreachable!("already checked that it's Local"),
