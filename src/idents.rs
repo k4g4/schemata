@@ -13,3 +13,4 @@ pub const TRUE: &str = "#t";
 pub const FALSE: &str = "#f";
 
 pub const DEFINE: &str = "define";
+pub const COND: &str = "cond";

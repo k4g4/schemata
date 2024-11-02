@@ -53,6 +53,7 @@ fn expr(input: &I) -> ParseRes<Syn> {
     let syns = (
         double.map(Syn::Num),
         value(Syn::Define, tag(idents::DEFINE)),
+        value(Syn::Cond, tag(idents::COND)),
         token.map(Syn::Ident),
         context("identifier", ident).map(Syn::Ident),
         context("list", list).map(Syn::Group),

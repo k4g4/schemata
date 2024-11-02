@@ -9,8 +9,9 @@ use std::{fmt, rc::Rc};
 #[derive(Clone, Debug)]
 pub enum Syn<'src> {
     Num(f64),
-    Define,
     Ident(&'src str),
+    Define,
+    Cond,
     Group(Vec<Syn<'src>>),
 }
 
@@ -28,8 +29,6 @@ impl<'src> Syn<'src> {
     ) -> Result<(Item<'src>, Rc<Scope<'src>>), Error> {
         match self {
             &Self::Num(n) => Ok((Item::Num(n), scope)),
-
-            Self::Define => Err(Error::Other(format!("Unexpected '{}'", idents::DEFINE))),
 
             &Self::Ident(ident) => {
                 if let Some(lookup) = scope.lookup(ident) {
@@ -60,6 +59,9 @@ impl<'src> Syn<'src> {
                     Ok((builtin, scope))
                 }
             }
+
+            Self::Define => Err(Error::Other(format!("Unexpected '{}'", idents::DEFINE))),
+            Self::Cond => Err(Error::Other(format!("Unexpected '{}'", idents::COND))),
 
             Self::Group(group) => match group.as_slice() {
                 [] => Ok((Item::nil(), scope)),
@@ -109,6 +111,50 @@ impl<'src> Syn<'src> {
 
                 [Self::Define, ..] => Err(Error::Other(format!("Malformed '{}'", idents::DEFINE))),
 
+                [Self::Cond, conds @ ..] if !conds.is_empty() => {
+                    let mut scope = scope;
+                    for cond in conds {
+                        if let Self::Group(group) = cond {
+                            match group.as_slice() {
+                                [] => {
+                                    return Err(Error::Other(format!(
+                                        "Malformed '{}'",
+                                        idents::COND
+                                    )));
+                                }
+
+                                [cond, syns @ ..] => {
+                                    scope = {
+                                        let (cond, scope) = cond.eval(scope, Defs::NotAllowed)?;
+                                        let cond = cond.apply()?;
+
+                                        if !matches!(cond, Item::Token(Token::False)) {
+                                            return syns
+                                                .iter()
+                                                .try_fold((cond, scope), |(_, scope), syn| {
+                                                    syn.eval(scope, Defs::NotAllowed)
+                                                })
+                                                .and_then(|(item, scope)| {
+                                                    Ok((item.apply()?, scope))
+                                                });
+                                        }
+                                        scope
+                                    }
+                                }
+                            }
+                        } else {
+                            return Err(Error::Other(format!("Malformed '{}'", idents::COND)));
+                        }
+                    }
+
+                    Err(Error::Other(format!(
+                        "All conditions are '{}'",
+                        idents::FALSE
+                    )))
+                }
+
+                [Self::Cond, ..] => Err(Error::Other(format!("Malformed '{}'", idents::COND))),
+
                 _ => group
                     .iter()
                     .try_rfold((Item::nil(), scope), |(tail, scope), syn| {
@@ -134,8 +180,9 @@ impl fmt::Display for Syn<'_> {
 
         match self {
             Self::Num(num) => write!(f, "{num}"),
-            Self::Define => write!(f, "{}", idents::DEFINE),
             Self::Ident(ident) => write!(f, "{ident}"),
+            Self::Define => write!(f, "{}", idents::DEFINE),
+            Self::Cond => write!(f, "{}", idents::COND),
             Self::Group(items) if items.is_empty() => write!(f, "()"),
             Self::Group(items) => {
                 writeln!(f, "(")?;
