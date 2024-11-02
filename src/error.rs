@@ -1,9 +1,13 @@
 use nom::error::{ContextError, ErrorKind, FromExternalError, ParseError};
-use std::{error, fmt};
+use std::{
+    backtrace::{Backtrace, BacktraceStatus},
+    error, fmt,
+};
 
 #[derive(Debug)]
 pub enum Error {
     Parse {
+        bt: Backtrace,
         kind: ErrorKind,
     },
     Expected {
@@ -28,7 +32,10 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Parse { kind } => write!(f, "[Inside {}]", kind.description()),
+            Self::Parse { bt, .. } if bt.status() == BacktraceStatus::Captured => {
+                write!(f, "{bt}")
+            }
+            Self::Parse { kind, .. } => write!(f, "[Inside {}]", kind.description()),
             Self::Expected { char } => write!(f, "[Expected '{char}']"),
             Self::Appended { kind, error } => {
                 write!(f, "{error}\n[Inside {}]", kind.description())
@@ -47,7 +54,10 @@ impl error::Error for Error {}
 
 impl<I> ParseError<I> for Error {
     fn from_error_kind(_: I, kind: ErrorKind) -> Self {
-        Self::Parse { kind }
+        Self::Parse {
+            bt: Backtrace::capture(),
+            kind,
+        }
     }
 
     fn append(_: I, kind: ErrorKind, other: Self) -> Self {

@@ -8,11 +8,11 @@ use nom::{
     branch::{alt, Alt},
     bytes::complete::{tag, take_till1, take_until},
     character::complete::{char, multispace0, one_of},
-    combinator::{all_consuming, map_res, not, opt, peek, value},
+    combinator::{all_consuming, cut, map_res, not, peek, value},
     error::context,
-    multi::many0,
+    multi::{many0, many0_count},
     number::complete::double,
-    sequence::{delimited, preceded, terminated},
+    sequence::{delimited, pair, preceded, terminated},
     Parser,
 };
 use std::str;
@@ -23,14 +23,17 @@ type ParseRes<'src, O> = nom::IResult<&'src I, O, Error>;
 
 const DELIMS: &[u8] = b"();\"'`|[]{} \r\t\n";
 
-pub fn repl(input: &I) -> Result<(), Error> {
-    let syns = match syns(input) {
-        Ok((_, syns)) => syns,
-        Err(nom::Err::Error(error) | nom::Err::Failure(error)) => return Err(error),
-        Err(nom::Err::Incomplete(_)) => return Err(Error::Unexpected),
-    };
+pub fn repl(prelude: &I, input: &I) -> Result<(), Error> {
+    let prelude_syns = read(syns)(prelude)?;
+    let input_syns = read(syns)(input)?;
 
-    syns.iter().try_fold(Scope::new_global(), |scope, syn| {
+    let scope = prelude_syns
+        .iter()
+        .try_fold(Scope::new_global(), |scope, syn| {
+            syn.eval(scope, Defs::Allowed).map(|(_, scope)| scope)
+        })?;
+
+    input_syns.iter().try_fold(scope, |scope, syn| {
         println!("Expression:");
         println!("{syn}");
         println!();
@@ -47,8 +50,18 @@ pub fn repl(input: &I) -> Result<(), Error> {
     Ok(())
 }
 
+fn read<'a, O>(
+    mut parser: impl FnMut(&'a I) -> ParseRes<O>,
+) -> impl FnMut(&'a I) -> Result<O, Error> {
+    move |input| match parser(input) {
+        Ok((_, out)) => Ok(out),
+        Err(nom::Err::Error(error) | nom::Err::Failure(error)) => Err(error),
+        Err(nom::Err::Incomplete(_)) => Err(Error::Unexpected),
+    }
+}
+
 fn syns(input: &I) -> ParseRes<Vec<Syn>> {
-    all_consuming(many0(expr))(input)
+    all_consuming(many0(syn))(input)
 }
 
 fn comment(input: &I) -> ParseRes<()> {
@@ -56,18 +69,18 @@ fn comment(input: &I) -> ParseRes<()> {
 }
 
 fn ignore(input: &I) -> ParseRes<()> {
-    delimited(multispace0, value((), opt(comment)), multispace0)(input)
+    value((), multispace0.and(many0_count(comment.and(multispace0))))(input)
 }
 
-fn expr(input: &I) -> ParseRes<Syn> {
-    let syns = (
+fn syn(input: &I) -> ParseRes<Syn> {
+    let syn_parsers = (
         reserved.map(Syn::Reserved),
         double.map(Syn::Num),
         token.map(Syn::Ident),
         context("identifier", ident).map(Syn::Ident),
         context("list", list).map(Syn::Group),
     );
-    delimited(ignore, alt(syns), ignore)(input)
+    delimited(ignore, alt(syn_parsers), ignore)(input)
 }
 
 fn any_delim<'i, O>(mut list: impl Alt<&'i I, O, Error>) -> impl FnMut(&'i I) -> ParseRes<'i, O> {
@@ -92,13 +105,19 @@ fn token(input: &I) -> ParseRes<&str> {
 }
 
 fn ident(input: &I) -> ParseRes<&str> {
-    let ident = preceded(
-        not(one_of::<_, _, Error>("#,").or(one_of(DELIMS))),
-        take_till1(|c| DELIMS.contains(&c)),
-    );
-    map_res(ident, str::from_utf8)(input)
+    map_res(
+        preceded(
+            not(one_of::<_, _, Error>("#,").or(one_of(DELIMS))),
+            take_till1(|c| DELIMS.contains(&c)),
+        ),
+        str::from_utf8,
+    )(input)
 }
 
 fn list(input: &I) -> ParseRes<Vec<Syn>> {
-    delimited(char('(').and(ignore), many0(expr), ignore.and(char(')')))(input)
+    delimited(
+        pair(char('('), ignore),
+        many0(syn),
+        cut(pair(ignore, char(')'))),
+    )(input)
 }

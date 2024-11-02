@@ -6,7 +6,7 @@ mod scope;
 mod syn;
 
 use clap::Parser;
-use std::{fs::File, io::Read, path::PathBuf};
+use std::{fs, path::PathBuf};
 
 #[derive(Parser)]
 struct Args {
@@ -17,16 +17,11 @@ struct Args {
 fn main() {
     let Args { input } = Args::parse();
 
-    let mut contents = include_bytes!("../prelude.scm").to_vec();
+    let prelude = include_bytes!("../prelude.scm");
 
-    let Ok(mut file) = File::open(&input) else {
-        eprintln!("ERROR: Failed to read '{}'", input.display());
-        return;
-    };
-
-    if let Ok(bytes) = file.read_to_end(&mut contents) {
-        println!("Read {bytes} bytes.\n");
-        if let Err(error) = parse::repl(&contents) {
+    if let Ok(contents) = fs::read(&input) {
+        println!("Read {} bytes.\n", contents.len());
+        if let Err(error) = parse::repl(prelude, &contents) {
             eprintln!("ERROR:\n{error}");
         } else {
             print!("-- Finished --");
