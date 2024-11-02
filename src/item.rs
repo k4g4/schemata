@@ -15,7 +15,23 @@ pub enum Item<'src> {
     Num(f64),
     List(Option<Rc<List<'src>>>),
     Proc(Proc<'src>),
+    Token(Token),
     Defined,
+}
+
+#[derive(PartialEq, Copy, Clone, Debug)]
+pub enum Token {
+    True,
+    False,
+}
+
+impl fmt::Display for Token {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::True => write!(f, "{}", idents::TRUE),
+            Self::False => write!(f, "{}", idents::FALSE),
+        }
+    }
 }
 
 impl<'src> Item<'src> {
@@ -65,8 +81,9 @@ impl fmt::Display for Item<'_> {
         indent(f)?;
 
         match self {
-            Self::Num(num) => num.fmt(f),
-            Self::Proc(proc) => proc.fmt(f),
+            Self::Num(num) => write!(f, "{num}"),
+            Self::Proc(proc) => write!(f, "{proc}"),
+            Self::Token(token) => write!(f, "{token}"),
             Self::Defined => write!(f, "<{}>", idents::DEFINE),
             Self::List(list) => {
                 if let Some(List { head, tail }) = list.as_deref() {
@@ -126,11 +143,12 @@ pub struct List<'src> {
 #[derive(Clone, Debug)]
 pub enum Proc<'src> {
     Arith(Arith),
+    Cmp(Cmp),
     User {
-        name: &'src str,
+        name: Option<&'src str>,
         params: Rc<[&'src str]>,
         scope: Rc<Scope<'src>>,
-        body: &'src Syn<'src>,
+        body: &'src [Syn<'src>],
     },
 }
 
@@ -144,13 +162,41 @@ pub enum Arith {
 
 impl fmt::Display for Arith {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Arith::Add => idents::ADD,
-            Arith::Sub => idents::SUB,
-            Arith::Mul => idents::MUL,
-            Arith::Div => idents::DIV,
-        }
-        .fmt(f)
+        write!(
+            f,
+            "{}",
+            match self {
+                Arith::Add => idents::ADD,
+                Arith::Sub => idents::SUB,
+                Arith::Mul => idents::MUL,
+                Arith::Div => idents::DIV,
+            }
+        )
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum Cmp {
+    Eq,
+    Gt,
+    Ge,
+    Lt,
+    Le,
+}
+
+impl fmt::Display for Cmp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Cmp::Eq => idents::EQ,
+                Cmp::Gt => idents::GT,
+                Cmp::Ge => idents::GE,
+                Cmp::Lt => idents::LT,
+                Cmp::Le => idents::LE,
+            }
+        )
     }
 }
 
@@ -160,9 +206,7 @@ impl<'src> Proc<'src> {
             Proc::Arith(arith) => {
                 // guard against invalid args
                 if !args.clone().all(|item| matches!(item, Item::Num(_))) {
-                    return Err(Error::Other(format!(
-                        "<{arith}> cannot operate on non-number"
-                    )));
+                    return Err(Error::Other(format!("{self} cannot operate on non-number")));
                 }
                 // guard against 0 args
                 if args.clone().next().is_none() {
@@ -207,6 +251,39 @@ impl<'src> Proc<'src> {
                 .ok_or(Error::Unexpected)
             }
 
+            Proc::Cmp(cmp) => {
+                // guard against invalid args
+                if !args.clone().all(|item| matches!(item, Item::Num(_))) {
+                    return Err(Error::Other(format!("{self} cannot operate on non-number")));
+                }
+
+                let cmp = match cmp {
+                    Cmp::Eq => |lhs, rhs| lhs == rhs,
+                    Cmp::Gt => |lhs, rhs| lhs > rhs,
+                    Cmp::Ge => |lhs, rhs| lhs >= rhs,
+                    Cmp::Lt => |lhs, rhs| lhs < rhs,
+                    Cmp::Le => |lhs, rhs| lhs <= rhs,
+                };
+
+                let (token, _) = args
+                    .flat_map(|item| {
+                        if let &Item::Num(n) = item {
+                            Some(n)
+                        } else {
+                            None
+                        }
+                    })
+                    .fold((true, None), |(still_true, prev), num| {
+                        if still_true {
+                            prev.map_or((true, Some(num)), |prev| (cmp(prev, num), Some(num)))
+                        } else {
+                            (false, None)
+                        }
+                    });
+
+                Ok(Item::Token(if token { Token::True } else { Token::False }))
+            }
+
             Proc::User {
                 name,
                 params,
@@ -234,11 +311,26 @@ impl<'src> Proc<'src> {
                             params.len()
                         )));
                     }
-                    scope.add(&name, Item::Proc(self.clone()))
+
+                    if let Some(name) = name {
+                        scope.add(&name, Item::Proc(self.clone()))
+                    } else {
+                        scope
+                    }
                 };
 
-                body.eval(scope, Defs::Allowed)
-                    .and_then(|(item, _)| item.apply())
+                body.iter()
+                    .try_fold((Item::nil(), scope), |(_, scope), syn| {
+                        syn.eval(scope, Defs::Allowed)
+                            .and_then(|(item, scope)| Ok((item.apply()?, scope)))
+                    })
+                    .and_then(|(item, _)| {
+                        if let Item::Defined = item {
+                            Err(Error::Other(format!("Ill-placed '{}'", idents::DEFINE)))
+                        } else {
+                            Ok(item)
+                        }
+                    })
             }
         }
     }
@@ -247,8 +339,12 @@ impl<'src> Proc<'src> {
 impl fmt::Display for Proc<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Proc::Arith(arith) => arith.fmt(f),
-            Proc::User { name, .. } => write!(f, "<proc '{name}'>"),
+            Self::Arith(arith) => write!(f, "<({arith})>"),
+            Self::Cmp(cmp) => write!(f, "<({cmp})'>"),
+            Self::User { name: None, .. } => write!(f, "<lambda>"),
+            Self::User {
+                name: Some(name), ..
+            } => write!(f, "<proc '{name}'>"),
         }
     }
 }

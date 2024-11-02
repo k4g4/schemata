@@ -1,7 +1,7 @@
 use crate::{
     error::Error,
     idents,
-    item::{Arith, Item, Proc},
+    item::{Arith, Cmp, Item, Proc, Token},
     scope::Scope,
 };
 use std::{fmt, rc::Rc};
@@ -35,18 +35,29 @@ impl<'src> Syn<'src> {
                 if let Some(lookup) = scope.lookup(ident) {
                     Ok((lookup, scope))
                 } else {
-                    let arith = match ident {
-                        idents::ADD => Arith::Add,
-                        idents::SUB => Arith::Sub,
-                        idents::MUL => Arith::Mul,
-                        idents::DIV => Arith::Div,
+                    let builtin = match ident {
+                        idents::ADD => Item::Proc(Proc::Arith(Arith::Add)),
+                        idents::SUB => Item::Proc(Proc::Arith(Arith::Sub)),
+                        idents::MUL => Item::Proc(Proc::Arith(Arith::Mul)),
+                        idents::DIV => Item::Proc(Proc::Arith(Arith::Div)),
+
+                        idents::EQ => Item::Proc(Proc::Cmp(Cmp::Eq)),
+                        idents::GT => Item::Proc(Proc::Cmp(Cmp::Gt)),
+                        idents::GE => Item::Proc(Proc::Cmp(Cmp::Ge)),
+                        idents::LT => Item::Proc(Proc::Cmp(Cmp::Lt)),
+                        idents::LE => Item::Proc(Proc::Cmp(Cmp::Le)),
+
+                        idents::TRUE => Item::Token(Token::True),
+                        idents::FALSE => Item::Token(Token::False),
+
                         _ => {
                             return Err(Error::Other(format!(
                                 "Failed to find definition for '{ident}'"
                             )));
                         }
                     };
-                    Ok((Item::Proc(Proc::Arith(arith)), scope))
+
+                    Ok((builtin, scope))
                 }
             }
 
@@ -62,38 +73,39 @@ impl<'src> Syn<'src> {
                     Ok((Item::Defined, scope.add(ident, item)))
                 }
 
-                [Self::Define, Self::Group(signature), body] => match signature.as_slice() {
-                    [Self::Ident(ident), params @ ..] => {
-                        let params = params
-                            .iter()
-                            .map(|param| {
-                                if let &Syn::Ident(ident) = param {
-                                    Ok(ident)
-                                } else {
-                                    Err(Error::Other(format!(
-                                        "'{param}' is not a valid parameter name"
-                                    )))
-                                }
-                            })
-                            .collect::<Result<_, _>>()?;
+                [Self::Define, Self::Group(signature), body @ ..] if !body.is_empty() => {
+                    match signature.as_slice() {
+                        [Self::Ident(ident), params @ ..] => {
+                            let params = params
+                                .iter()
+                                .map(|param| {
+                                    if let &Syn::Ident(ident) = param {
+                                        Ok(ident)
+                                    } else {
+                                        Err(Error::Other(format!(
+                                            "'{param}' is not a valid parameter name"
+                                        )))
+                                    }
+                                })
+                                .collect::<Result<_, _>>()?;
 
-                        //TODO
-                        Ok((
-                            Item::Defined,
-                            scope.clone().add(
-                                ident,
-                                Item::Proc(Proc::User {
-                                    name: ident,
-                                    params,
-                                    scope,
-                                    body,
-                                }),
-                            ),
-                        ))
+                            Ok((
+                                Item::Defined,
+                                scope.clone().add(
+                                    ident,
+                                    Item::Proc(Proc::User {
+                                        name: Some(ident),
+                                        params,
+                                        scope,
+                                        body,
+                                    }),
+                                ),
+                            ))
+                        }
+
+                        _ => Err(Error::Other("Malformed signature".into())),
                     }
-
-                    _ => Err(Error::Other("Malformed signature".into())),
-                },
+                }
 
                 [Self::Define, ..] => Err(Error::Other(format!("Malformed '{}'", idents::DEFINE))),
 
@@ -121,9 +133,9 @@ impl fmt::Display for Syn<'_> {
         indent(f)?;
 
         match self {
-            Self::Num(num) => num.fmt(f),
+            Self::Num(num) => write!(f, "{num}"),
             Self::Define => write!(f, "{}", idents::DEFINE),
-            Self::Ident(ident) => ident.fmt(f),
+            Self::Ident(ident) => write!(f, "{ident}"),
             Self::Group(items) if items.is_empty() => write!(f, "()"),
             Self::Group(items) => {
                 writeln!(f, "(")?;

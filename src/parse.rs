@@ -53,10 +53,15 @@ fn expr(input: &I) -> ParseRes<Syn> {
     let syns = (
         double.map(Syn::Num),
         value(Syn::Define, tag(idents::DEFINE)),
+        token.map(Syn::Ident),
         context("identifier", ident).map(Syn::Ident),
         context("list", list).map(Syn::Group),
     );
     delimited(multispace0, alt(syns), multispace0)(input)
+}
+
+fn token(input: &I) -> ParseRes<&str> {
+    map_res(alt((tag(idents::TRUE), tag(idents::FALSE))), str::from_utf8)(input)
 }
 
 fn ident(input: &I) -> ParseRes<&str> {
