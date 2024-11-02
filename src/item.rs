@@ -203,7 +203,7 @@ impl fmt::Display for Cmp {
 impl<'src> Proc<'src> {
     fn apply(&self, args: HeadsIter<'_, 'src>) -> Result<Item<'src>, Error> {
         match self {
-            Proc::Arith(arith) => {
+            Self::Arith(arith) => {
                 // guard against invalid args
                 if !args.clone().all(|item| matches!(item, Item::Num(_))) {
                     return Err(Error::Other(format!("{self} cannot operate on non-number")));
@@ -251,7 +251,7 @@ impl<'src> Proc<'src> {
                 .ok_or(Error::Unexpected)
             }
 
-            Proc::Cmp(cmp) => {
+            Self::Cmp(cmp) => {
                 // guard against invalid args
                 if !args.clone().all(|item| matches!(item, Item::Num(_))) {
                     return Err(Error::Other(format!("{self} cannot operate on non-number")));
@@ -284,7 +284,7 @@ impl<'src> Proc<'src> {
                 Ok(Item::Token(if token { Token::True } else { Token::False }))
             }
 
-            Proc::User {
+            Self::User {
                 name,
                 params,
                 scope,

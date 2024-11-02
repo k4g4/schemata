@@ -19,14 +19,18 @@ pub enum Reserved {
     Define,
     Cond,
     Else,
+    And,
+    Or,
 }
 
 impl fmt::Display for Reserved {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Reserved::Define => write!(f, "{}", idents::DEFINE),
-            Reserved::Cond => write!(f, "{}", idents::COND),
-            Reserved::Else => write!(f, "{}", idents::ELSE),
+            Self::Define => write!(f, "{}", idents::DEFINE),
+            Self::Cond => write!(f, "{}", idents::COND),
+            Self::Else => write!(f, "{}", idents::ELSE),
+            Self::And => write!(f, "{}", idents::AND),
+            Self::Or => write!(f, "{}", idents::OR),
         }
     }
 }
@@ -51,6 +55,9 @@ impl<'src> Syn<'src> {
                     Ok((lookup, scope))
                 } else {
                     let builtin = match ident {
+                        idents::TRUE => Item::Token(Token::True),
+                        idents::FALSE => Item::Token(Token::False),
+
                         idents::ADD => Item::Proc(Proc::Arith(Arith::Add)),
                         idents::SUB => Item::Proc(Proc::Arith(Arith::Sub)),
                         idents::MUL => Item::Proc(Proc::Arith(Arith::Mul)),
@@ -61,9 +68,6 @@ impl<'src> Syn<'src> {
                         idents::GE => Item::Proc(Proc::Cmp(Cmp::Ge)),
                         idents::LT => Item::Proc(Proc::Cmp(Cmp::Lt)),
                         idents::LE => Item::Proc(Proc::Cmp(Cmp::Le)),
-
-                        idents::TRUE => Item::Token(Token::True),
-                        idents::FALSE => Item::Token(Token::False),
 
                         _ => {
                             return Err(Error::Other(format!(
@@ -194,6 +198,24 @@ impl<'src> Syn<'src> {
 
                 [Self::Reserved(Reserved::Cond), ..] => {
                     Err(Error::Other(format!("Malformed '{}'", idents::COND)))
+                }
+
+                [Self::Reserved(reserved @ (Reserved::And | Reserved::Or)), syns @ ..] => {
+                    let is_or = *reserved == Reserved::Or;
+                    let initial = Item::Token(if is_or { Token::True } else { Token::False });
+
+                    syns.iter()
+                        .try_fold((false, initial, scope), |(done, prev, scope), syn| {
+                            if done {
+                                Ok((true, prev, scope))
+                            } else {
+                                let (item, scope) = syn.eval(scope, Defs::NotAllowed)?;
+                                let item = item.apply()?;
+                                let done = matches!(item, Item::Token(Token::False)) ^ is_or;
+                                Ok((done, item, scope))
+                            }
+                        })
+                        .map(|(_, item, scope)| (item, scope))
                 }
 
                 _ => group

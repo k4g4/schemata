@@ -79,6 +79,8 @@ fn reserved(input: &I) -> ParseRes<Reserved> {
         value(Reserved::Define, tag(idents::DEFINE)),
         value(Reserved::Cond, tag(idents::COND)),
         value(Reserved::Else, tag(idents::ELSE)),
+        value(Reserved::And, tag(idents::AND)),
+        value(Reserved::Or, tag(idents::OR)),
     ))(input)
 }
 
