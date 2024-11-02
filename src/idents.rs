@@ -14,3 +14,4 @@ pub const FALSE: &str = "#f";
 
 pub const DEFINE: &str = "define";
 pub const COND: &str = "cond";
+pub const ELSE: &str = "else";

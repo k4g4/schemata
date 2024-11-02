@@ -10,9 +10,25 @@ use std::{fmt, rc::Rc};
 pub enum Syn<'src> {
     Num(f64),
     Ident(&'src str),
+    Reserved(Reserved),
+    Group(Vec<Syn<'src>>),
+}
+
+#[derive(PartialEq, Copy, Clone, Debug)]
+pub enum Reserved {
     Define,
     Cond,
-    Group(Vec<Syn<'src>>),
+    Else,
+}
+
+impl fmt::Display for Reserved {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Reserved::Define => write!(f, "{}", idents::DEFINE),
+            Reserved::Cond => write!(f, "{}", idents::COND),
+            Reserved::Else => write!(f, "{}", idents::ELSE),
+        }
+    }
 }
 
 #[derive(PartialEq, Copy, Clone, Debug)]
@@ -60,22 +76,23 @@ impl<'src> Syn<'src> {
                 }
             }
 
-            Self::Define => Err(Error::Other(format!("Unexpected '{}'", idents::DEFINE))),
-            Self::Cond => Err(Error::Other(format!("Unexpected '{}'", idents::COND))),
+            Self::Reserved(reserved) => Err(Error::Other(format!("Unexpected '{reserved}'"))),
 
             Self::Group(group) => match group.as_slice() {
                 [] => Ok((Item::nil(), scope)),
 
-                [Self::Define, ..] if defs == Defs::NotAllowed => {
+                [Self::Reserved(Reserved::Define), ..] if defs == Defs::NotAllowed => {
                     Err(Error::Other(format!("Ill-placed '{}'", idents::DEFINE)))
                 }
 
-                [Self::Define, Self::Ident(ident), def] => {
+                [Self::Reserved(Reserved::Define), Self::Ident(ident), def] => {
                     let (item, scope) = def.eval(scope, Defs::NotAllowed)?;
                     Ok((Item::Defined, scope.add(ident, item)))
                 }
 
-                [Self::Define, Self::Group(signature), body @ ..] if !body.is_empty() => {
+                [Self::Reserved(Reserved::Define), Self::Group(signature), body @ ..]
+                    if !body.is_empty() =>
+                {
                     match signature.as_slice() {
                         [Self::Ident(ident), params @ ..] => {
                             let params = params
@@ -109,11 +126,13 @@ impl<'src> Syn<'src> {
                     }
                 }
 
-                [Self::Define, ..] => Err(Error::Other(format!("Malformed '{}'", idents::DEFINE))),
+                [Self::Reserved(Reserved::Define), ..] => {
+                    Err(Error::Other(format!("Malformed '{}'", idents::DEFINE)))
+                }
 
-                [Self::Cond, conds @ ..] if !conds.is_empty() => {
+                [Self::Reserved(Reserved::Cond), conds @ ..] if !conds.is_empty() => {
                     let mut scope = scope;
-                    for cond in conds {
+                    for (i, cond) in conds.iter().enumerate() {
                         if let Self::Group(group) = cond {
                             match group.as_slice() {
                                 [] => {
@@ -121,6 +140,26 @@ impl<'src> Syn<'src> {
                                         "Malformed '{}'",
                                         idents::COND
                                     )));
+                                }
+
+                                [Self::Reserved(Reserved::Else)] => {
+                                    return Err(Error::Other(format!(
+                                        "Malformed '{}'",
+                                        idents::ELSE
+                                    )))
+                                }
+
+                                [Self::Reserved(Reserved::Else), syn, syns @ ..] => {
+                                    return if i == conds.len() - 1 {
+                                        syns.iter()
+                                            .try_fold(
+                                                syn.eval(scope, Defs::NotAllowed)?,
+                                                |(_, scope), syn| syn.eval(scope, Defs::NotAllowed),
+                                            )
+                                            .and_then(|(item, scope)| Ok((item.apply()?, scope)))
+                                    } else {
+                                        Err(Error::Other(format!("Ill-placed '{}'", idents::ELSE)))
+                                    };
                                 }
 
                                 [cond, syns @ ..] => {
@@ -153,7 +192,9 @@ impl<'src> Syn<'src> {
                     )))
                 }
 
-                [Self::Cond, ..] => Err(Error::Other(format!("Malformed '{}'", idents::COND))),
+                [Self::Reserved(Reserved::Cond), ..] => {
+                    Err(Error::Other(format!("Malformed '{}'", idents::COND)))
+                }
 
                 _ => group
                     .iter()
@@ -181,8 +222,7 @@ impl fmt::Display for Syn<'_> {
         match self {
             Self::Num(num) => write!(f, "{num}"),
             Self::Ident(ident) => write!(f, "{ident}"),
-            Self::Define => write!(f, "{}", idents::DEFINE),
-            Self::Cond => write!(f, "{}", idents::COND),
+            Self::Reserved(reserved) => write!(f, "{reserved}"),
             Self::Group(items) if items.is_empty() => write!(f, "()"),
             Self::Group(items) => {
                 writeln!(f, "(")?;
