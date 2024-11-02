@@ -5,7 +5,7 @@ use std::{
 };
 
 #[derive(Debug)]
-pub enum Error {
+pub enum ParserError {
     Parse {
         bt: Backtrace,
         kind: ErrorKind,
@@ -15,21 +15,20 @@ pub enum Error {
     },
     Appended {
         kind: ErrorKind,
-        error: Box<Error>,
+        error: Box<ParserError>,
     },
     WithContext {
         ctx: String,
-        error: Box<Error>,
+        error: Box<ParserError>,
     },
     External {
         kind: ErrorKind,
-        external: Box<dyn error::Error>,
+        external: Box<dyn error::Error + Send + Sync>,
     },
     Unexpected,
-    Other(String),
 }
 
-impl fmt::Display for Error {
+impl fmt::Display for ParserError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Parse { bt, .. } if bt.status() == BacktraceStatus::Captured => {
@@ -45,14 +44,13 @@ impl fmt::Display for Error {
                 write!(f, "[{external}]\n[Inside {}]", kind.description())
             }
             Self::Unexpected => write!(f, "[Unexpected error]"),
-            Self::Other(description) => write!(f, "[{description}]"),
         }
     }
 }
 
-impl error::Error for Error {}
+impl error::Error for ParserError {}
 
-impl<I> ParseError<I> for Error {
+impl<I> ParseError<I> for ParserError {
     fn from_error_kind(_: I, kind: ErrorKind) -> Self {
         Self::Parse {
             bt: Backtrace::capture(),
@@ -72,7 +70,7 @@ impl<I> ParseError<I> for Error {
     }
 }
 
-impl<I> ContextError<I> for Error {
+impl<I> ContextError<I> for ParserError {
     fn add_context(_: I, ctx: &'static str, other: Self) -> Self {
         Self::WithContext {
             ctx: ctx.into(),
@@ -81,7 +79,7 @@ impl<I> ContextError<I> for Error {
     }
 }
 
-impl<I, E: error::Error + 'static> FromExternalError<I, E> for Error {
+impl<I, E: error::Error + Send + Sync + 'static> FromExternalError<I, E> for ParserError {
     fn from_external_error(_: I, kind: ErrorKind, e: E) -> Self {
         Self::External {
             kind,

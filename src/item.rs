@@ -1,9 +1,9 @@
 use crate::{
-    error::Error,
     idents,
     scope::Scope,
     syn::{Defs, Syn},
 };
+use anyhow::{bail, ensure, Result};
 use std::{
     fmt,
     ops::{Add, Div, Mul, Sub},
@@ -43,6 +43,10 @@ impl<'src> Item<'src> {
         Self::List(Some(Rc::new(List { head, tail })))
     }
 
+    pub fn is_truthy(&self) -> bool {
+        !matches!(self, Self::Token(Token::False))
+    }
+
     fn iter(&self) -> HeadsIter<'_, 'src> {
         HeadsIter(if let Self::List(list) = self {
             list.as_deref()
@@ -51,7 +55,7 @@ impl<'src> Item<'src> {
         })
     }
 
-    pub fn apply(self) -> Result<Self, Error> {
+    pub fn apply(self) -> Result<Self> {
         if let Self::List(list) = &self {
             match list.as_deref() {
                 Some(List {
@@ -59,9 +63,9 @@ impl<'src> Item<'src> {
                     tail,
                 }) => proc.apply(tail.iter()),
 
-                Some(List { head, .. }) => Err(Error::Other(format!("{head} is not a procedure"))),
+                Some(List { head, .. }) => bail!("'{head}' is not a procedure"),
 
-                None => Err(Error::Other("Empty list cannot be evaluated".into())),
+                None => bail!("'()' cannot be evaluated"),
             }
         } else {
             Ok(self)
@@ -201,36 +205,36 @@ impl fmt::Display for Cmp {
 }
 
 impl<'src> Proc<'src> {
-    fn apply(&self, args: HeadsIter<'_, 'src>) -> Result<Item<'src>, Error> {
+    fn apply(&self, args: HeadsIter<'_, 'src>) -> Result<Item<'src>> {
         match self {
             Self::Arith(arith) => {
                 // guard against invalid args
-                if !args.clone().all(|item| matches!(item, Item::Num(_))) {
-                    return Err(Error::Other(format!("{self} cannot operate on non-number")));
-                }
+                ensure!(
+                    args.clone().all(|item| matches!(item, Item::Num(_))),
+                    "{self} cannot operate on non-number"
+                );
                 // guard against 0 args
                 if args.clone().next().is_none() {
                     return match arith {
                         Arith::Add => Ok(Item::Num(0.0)),
                         Arith::Mul => Ok(Item::Num(1.0)),
-                        Arith::Sub | Arith::Div => Err(Error::Other(format!(
-                            "Wront number of arguments for <{arith}>"
-                        ))),
+                        Arith::Sub | Arith::Div => bail!("Wront number of arguments for <{arith}>"),
                     };
                 }
                 // guard against div by zero
-                if matches!(arith, Arith::Div)
-                    && args.clone().any(|item| matches!(item, Item::Num(0.0)))
-                {
-                    return Err(Error::Other("Cannot divide by zero".into()));
-                };
+                ensure!(
+                    !(matches!(arith, Arith::Div)
+                        && args.clone().any(|item| matches!(item, Item::Num(0.0)))),
+                    "Cannot divide by zero"
+                );
+
                 // guard against 1 arg
                 if args.clone().skip(1).next().is_none() {
                     return match (arith, args.clone().next()) {
                         (Arith::Add | Arith::Mul, Some(&Item::Num(num))) => Ok(Item::Num(num)),
                         (Arith::Sub, Some(Item::Num(num))) => Ok(Item::Num(-num)),
                         (Arith::Div, Some(Item::Num(num))) => Ok(Item::Num(1.0 / num)),
-                        _ => Err(Error::Unexpected),
+                        _ => bail!("unreachable arithmetic"),
                     };
                 }
 
@@ -248,14 +252,15 @@ impl<'src> Proc<'src> {
                     Arith::Div => <_ as Div>::div,
                 })
                 .map(Item::Num)
-                .ok_or(Error::Unexpected)
+                .ok_or_else(|| anyhow::anyhow!("unreachable arithmetic"))
             }
 
             Self::Cmp(cmp) => {
                 // guard against invalid args
-                if !args.clone().all(|item| matches!(item, Item::Num(_))) {
-                    return Err(Error::Other(format!("{self} cannot operate on non-number")));
-                }
+                ensure!(
+                    args.clone().all(|item| matches!(item, Item::Num(_))),
+                    "{self} cannot operate on non-number"
+                );
 
                 let cmp = match cmp {
                     Cmp::Eq => |lhs, rhs| lhs == rhs,
@@ -298,19 +303,15 @@ impl<'src> Proc<'src> {
                             if let Some(item) = args.next() {
                                 Ok(scope.add(param, item.clone()))
                             } else {
-                                Err(Error::Other(format!(
-                                    "Expected {} param(s), got {i}",
-                                    params.len()
-                                )))
+                                bail!("Expected {} parameter(s), got {i}", params.len());
                             }
                         },
                     )?;
-                    if !args.next().is_none() {
-                        return Err(Error::Other(format!(
-                            "Too many params, expected {}",
-                            params.len()
-                        )));
-                    }
+                    ensure!(
+                        args.next().is_none(),
+                        "Too many parameters for {self}, expected {}",
+                        params.len()
+                    );
 
                     if let Some(name) = name {
                         scope.add(&name, Item::Proc(self.clone()))
@@ -326,7 +327,7 @@ impl<'src> Proc<'src> {
                     })
                     .and_then(|(item, _)| {
                         if let Item::Defined = item {
-                            Err(Error::Other(format!("Ill-placed '{}'", idents::DEFINE)))
+                            bail!("Ill-placed '{}'", idents::DEFINE);
                         } else {
                             Ok(item)
                         }

@@ -15,5 +15,6 @@ pub const LE: &str = "<=";
 pub const DEFINE: &str = "define";
 pub const COND: &str = "cond";
 pub const ELSE: &str = "else";
+pub const IF: &str = "if";
 pub const AND: &str = "and";
 pub const OR: &str = "or";

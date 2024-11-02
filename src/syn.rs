@@ -1,9 +1,9 @@
 use crate::{
-    error::Error,
     idents,
     item::{Arith, Cmp, Item, Proc, Token},
     scope::Scope,
 };
+use anyhow::{bail, Result};
 use std::{fmt, rc::Rc};
 
 #[derive(Clone, Debug)]
@@ -19,6 +19,7 @@ pub enum Reserved {
     Define,
     Cond,
     Else,
+    If,
     And,
     Or,
 }
@@ -29,6 +30,7 @@ impl fmt::Display for Reserved {
             Self::Define => write!(f, "{}", idents::DEFINE),
             Self::Cond => write!(f, "{}", idents::COND),
             Self::Else => write!(f, "{}", idents::ELSE),
+            Self::If => write!(f, "{}", idents::IF),
             Self::And => write!(f, "{}", idents::AND),
             Self::Or => write!(f, "{}", idents::OR),
         }
@@ -46,7 +48,7 @@ impl<'src> Syn<'src> {
         &'src self,
         scope: Rc<Scope<'src>>,
         defs: Defs,
-    ) -> Result<(Item<'src>, Rc<Scope<'src>>), Error> {
+    ) -> Result<(Item<'src>, Rc<Scope<'src>>)> {
         match self {
             &Self::Num(n) => Ok((Item::Num(n), scope)),
 
@@ -70,9 +72,7 @@ impl<'src> Syn<'src> {
                         idents::LE => Item::Proc(Proc::Cmp(Cmp::Le)),
 
                         _ => {
-                            return Err(Error::Other(format!(
-                                "Failed to find definition for '{ident}'"
-                            )));
+                            bail!("Failed to find definition for '{ident}'");
                         }
                     };
 
@@ -80,13 +80,13 @@ impl<'src> Syn<'src> {
                 }
             }
 
-            Self::Reserved(reserved) => Err(Error::Other(format!("Unexpected '{reserved}'"))),
+            Self::Reserved(reserved) => bail!("Unexpected '{reserved}'"),
 
             Self::Group(group) => match group.as_slice() {
                 [] => Ok((Item::nil(), scope)),
 
                 [Self::Reserved(Reserved::Define), ..] if defs == Defs::NotAllowed => {
-                    Err(Error::Other(format!("Ill-placed '{}'", idents::DEFINE)))
+                    bail!("Ill-placed '{}'", idents::DEFINE);
                 }
 
                 [Self::Reserved(Reserved::Define), Self::Ident(ident), def] => {
@@ -105,9 +105,7 @@ impl<'src> Syn<'src> {
                                     if let &Syn::Ident(ident) = param {
                                         Ok(ident)
                                     } else {
-                                        Err(Error::Other(format!(
-                                            "'{param}' is not a valid parameter name"
-                                        )))
+                                        bail!("'{param}' is not a valid parameter name");
                                     }
                                 })
                                 .collect::<Result<_, _>>()?;
@@ -126,12 +124,12 @@ impl<'src> Syn<'src> {
                             ))
                         }
 
-                        _ => Err(Error::Other("Malformed signature".into())),
+                        _ => bail!("Malformed signature"),
                     }
                 }
 
                 [Self::Reserved(Reserved::Define), ..] => {
-                    Err(Error::Other(format!("Malformed '{}'", idents::DEFINE)))
+                    bail!("Malformed '{}'", idents::DEFINE)
                 }
 
                 [Self::Reserved(Reserved::Cond), conds @ ..] if !conds.is_empty() => {
@@ -139,18 +137,10 @@ impl<'src> Syn<'src> {
                     for (i, cond) in conds.iter().enumerate() {
                         if let Self::Group(group) = cond {
                             match group.as_slice() {
-                                [] => {
-                                    return Err(Error::Other(format!(
-                                        "Malformed '{}'",
-                                        idents::COND
-                                    )));
-                                }
+                                [] => bail!("Malformed '{}'", idents::COND),
 
                                 [Self::Reserved(Reserved::Else)] => {
-                                    return Err(Error::Other(format!(
-                                        "Malformed '{}'",
-                                        idents::ELSE
-                                    )))
+                                    bail!("Malformed '{}'", idents::ELSE);
                                 }
 
                                 [Self::Reserved(Reserved::Else), syn, syns @ ..] => {
@@ -162,7 +152,7 @@ impl<'src> Syn<'src> {
                                             )
                                             .and_then(|(item, scope)| Ok((item.apply()?, scope)))
                                     } else {
-                                        Err(Error::Other(format!("Ill-placed '{}'", idents::ELSE)))
+                                        bail!("Ill-placed '{}'", idents::ELSE);
                                     };
                                 }
 
@@ -171,7 +161,7 @@ impl<'src> Syn<'src> {
                                         let (cond, scope) = cond.eval(scope, Defs::NotAllowed)?;
                                         let cond = cond.apply()?;
 
-                                        if !matches!(cond, Item::Token(Token::False)) {
+                                        if cond.is_truthy() {
                                             return syns
                                                 .iter()
                                                 .try_fold((cond, scope), |(_, scope), syn| {
@@ -186,23 +176,48 @@ impl<'src> Syn<'src> {
                                 }
                             }
                         } else {
-                            return Err(Error::Other(format!("Malformed '{}'", idents::COND)));
+                            bail!("Malformed '{}'", idents::COND);
                         }
                     }
 
-                    Err(Error::Other(format!(
-                        "All conditions are '{}'",
-                        idents::FALSE
-                    )))
+                    bail!("All conditions are '{}'", idents::FALSE);
                 }
 
-                [Self::Reserved(Reserved::Cond), ..] => {
-                    Err(Error::Other(format!("Malformed '{}'", idents::COND)))
+                [Self::Reserved(Reserved::Cond), ..] => bail!("Malformed '{}'", idents::COND),
+
+                [Self::Reserved(Reserved::If), syns @ ..] => {
+                    let (cond, conseq, alt, scope) = match syns.len() {
+                        2 => {
+                            let (cond, scope) = syns[0].eval(scope, Defs::NotAllowed)?;
+                            let (conseq, scope) = syns[1].eval(scope, Defs::NotAllowed)?;
+                            (cond, conseq, None, scope)
+                        }
+                        3 => {
+                            let (cond, scope) = syns[0].eval(scope, Defs::NotAllowed)?;
+                            let (conseq, scope) = syns[1].eval(scope, Defs::NotAllowed)?;
+                            let (alt, scope) = syns[2].eval(scope, Defs::NotAllowed)?;
+                            (cond, conseq, Some(alt), scope)
+                        }
+                        _ => bail!("Malformed '{}'", idents::IF),
+                    };
+                    let cond = cond.apply()?;
+
+                    if cond.is_truthy() {
+                        Ok((conseq.apply()?, scope))
+                    } else if let Some(alt) = alt {
+                        Ok((alt.apply()?, scope))
+                    } else {
+                        bail!(
+                            "No alternative value for '{}' with {} predicate",
+                            idents::IF,
+                            idents::FALSE
+                        );
+                    }
                 }
 
                 [Self::Reserved(reserved @ (Reserved::And | Reserved::Or)), syns @ ..] => {
-                    let is_or = *reserved == Reserved::Or;
-                    let initial = Item::Token(if is_or { Token::True } else { Token::False });
+                    let is_and = *reserved == Reserved::And;
+                    let initial = Item::Token(if is_and { Token::False } else { Token::True });
 
                     syns.iter()
                         .try_fold((false, initial, scope), |(done, prev, scope), syn| {
@@ -211,7 +226,7 @@ impl<'src> Syn<'src> {
                             } else {
                                 let (item, scope) = syn.eval(scope, Defs::NotAllowed)?;
                                 let item = item.apply()?;
-                                let done = matches!(item, Item::Token(Token::False)) ^ is_or;
+                                let done = item.is_truthy() ^ is_and;
                                 Ok((done, item, scope))
                             }
                         })

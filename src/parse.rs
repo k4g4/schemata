@@ -1,9 +1,10 @@
 use crate::{
-    error::Error,
+    error::ParserError,
     idents,
     scope::Scope,
     syn::{Defs, Reserved, Syn},
 };
+use anyhow::Result;
 use nom::{
     branch::{alt, Alt},
     bytes::complete::{tag, take_till1, take_until},
@@ -19,11 +20,11 @@ use std::str;
 
 type I = [u8];
 
-type ParseRes<'src, O> = nom::IResult<&'src I, O, Error>;
+type ParseRes<'src, O> = nom::IResult<&'src I, O, ParserError>;
 
 const DELIMS: &[u8] = b"();\"'`|[]{} \r\t\n";
 
-pub fn repl(prelude: &I, input: &I) -> Result<(), Error> {
+pub fn repl(prelude: &I, input: &I) -> Result<()> {
     let prelude_syns = read(syns)(prelude)?;
     let input_syns = read(syns)(input)?;
 
@@ -44,19 +45,17 @@ pub fn repl(prelude: &I, input: &I) -> Result<(), Error> {
         println!("{item}");
         println!();
 
-        Ok(scope)
+        anyhow::Ok(scope)
     })?;
 
     Ok(())
 }
 
-fn read<'a, O>(
-    mut parser: impl FnMut(&'a I) -> ParseRes<O>,
-) -> impl FnMut(&'a I) -> Result<O, Error> {
+fn read<'a, O>(mut parser: impl FnMut(&'a I) -> ParseRes<O>) -> impl FnMut(&'a I) -> Result<O> {
     move |input| match parser(input) {
         Ok((_, out)) => Ok(out),
-        Err(nom::Err::Error(error) | nom::Err::Failure(error)) => Err(error),
-        Err(nom::Err::Incomplete(_)) => Err(Error::Unexpected),
+        Err(nom::Err::Error(error) | nom::Err::Failure(error)) => Err(error.into()),
+        Err(nom::Err::Incomplete(_)) => Err(ParserError::Unexpected.into()),
     }
 }
 
@@ -83,7 +82,9 @@ fn syn(input: &I) -> ParseRes<Syn> {
     delimited(ignore, alt(syn_parsers), ignore)(input)
 }
 
-fn any_delim<'i, O>(mut list: impl Alt<&'i I, O, Error>) -> impl FnMut(&'i I) -> ParseRes<'i, O> {
+fn any_delim<'i, O>(
+    mut list: impl Alt<&'i I, O, ParserError>,
+) -> impl FnMut(&'i I) -> ParseRes<'i, O> {
     move |input| terminated(|i| list.choice(i), peek(one_of(DELIMS)))(input)
 }
 
@@ -92,6 +93,7 @@ fn reserved(input: &I) -> ParseRes<Reserved> {
         value(Reserved::Define, tag(idents::DEFINE)),
         value(Reserved::Cond, tag(idents::COND)),
         value(Reserved::Else, tag(idents::ELSE)),
+        value(Reserved::If, tag(idents::IF)),
         value(Reserved::And, tag(idents::AND)),
         value(Reserved::Or, tag(idents::OR)),
     ))(input)
@@ -107,7 +109,7 @@ fn token(input: &I) -> ParseRes<&str> {
 fn ident(input: &I) -> ParseRes<&str> {
     map_res(
         preceded(
-            not(one_of::<_, _, Error>("#,").or(one_of(DELIMS))),
+            not(one_of::<_, _, ParserError>("#,").or(one_of(DELIMS))),
             take_till1(|c| DELIMS.contains(&c)),
         ),
         str::from_utf8,
