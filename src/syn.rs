@@ -69,6 +69,7 @@ impl<'src> Syn<'src> {
 
                         idents::LOG => Item::Proc(Proc::Log),
                         idents::EXP => Item::Proc(Proc::Exp),
+                        idents::REM => Item::Proc(Proc::Rem),
 
                         _ => {
                             bail!("Failed to find definition for '{ident}'");
@@ -89,8 +90,7 @@ impl<'src> Syn<'src> {
                 }
 
                 [Self::Reserved(Reserved::Define), Self::Ident(ident), def] => {
-                    let item = def.eval(scope, Defs::NotAllowed)?;
-                    scope.add(ident, item);
+                    scope.add(ident, def.eval(scope, Defs::NotAllowed)?)?;
                     Ok(Item::Defined)
                 }
 
@@ -108,13 +108,13 @@ impl<'src> Syn<'src> {
                                     }
                                 })
                                 .collect::<Result<_, _>>()?;
-                            let proc = Item::Proc(Proc::User {
+                            let proc = Item::Proc(Proc::Compound {
                                 name: Some(ident),
                                 params,
                                 scope: scope.clone(),
                                 body,
                             });
-                            scope.add(ident, proc);
+                            scope.add(ident, proc)?;
                             Ok(Item::Defined)
                         }
 

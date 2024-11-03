@@ -8,6 +8,10 @@
 ;;(define (<= x y)
 ;;    (not (> x y)))
 
+(define (even? x) (= (remainder x 2) 0))
+
+(define (square x) (* x x))
+
 (define (sqrt x)
     (define e .00001)
     (define (avg x y) (/ (+ x y) 2))
@@ -20,3 +24,13 @@
             guess
             (sqrt_ (avg guess (/ x guess)))))
     (sqrt_ (/ x 2)))
+
+(define (abs n)
+    (if (< n 0) (- n) n))
+
+(define (fib n)
+    (define (fib_ a b i)
+        (if (= i 1)
+            a
+            (fib_ b (+ a b) (- i 1))))
+    (fib_ 0 1 n))

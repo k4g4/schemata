@@ -179,7 +179,8 @@ pub enum Proc<'src> {
     Cmp(Cmp),
     Log,
     Exp,
-    User {
+    Rem,
+    Compound {
         name: Option<&'src str>,
         params: Rc<[&'src str]>,
         scope: Rc<Scope<'src>>,
@@ -219,7 +220,17 @@ impl<'src> Proc<'src> {
                 Ok(Item::Num(exp.exp()))
             }
 
-            Self::User {
+            Self::Rem => {
+                let mut args = NumsIter::try_from(args)?;
+                let Some((first, second)) =
+                    args.next().and_then(|first| Some((first, args.next()?)))
+                else {
+                    bail!("Wrong number of arguments for {self}");
+                };
+                Ok(Item::Num(first % second))
+            }
+
+            Self::Compound {
                 name,
                 params,
                 scope,
@@ -240,7 +251,7 @@ impl<'src> Proc<'src> {
                                 eprint!(", ");
                             }
                         }
-                        scope.add(param, item.clone());
+                        scope.add(param, item.clone())?;
                     } else {
                         bail!("Expected {} parameter(s), got {i}", params.len());
                     }
@@ -277,8 +288,9 @@ impl fmt::Display for Proc<'_> {
             Self::Cmp(cmp) => write!(f, "{cmp}"),
             Self::Log => write!(f, "<{}>", idents::LOG),
             Self::Exp => write!(f, "<{}>", idents::EXP),
-            Self::User { name: None, .. } => write!(f, "<{}>", idents::LAMBDA),
-            Self::User {
+            Self::Rem => write!(f, "<{}>", idents::REM),
+            Self::Compound { name: None, .. } => write!(f, "<{}>", idents::LAMBDA),
+            Self::Compound {
                 name: Some(name), ..
             } => write!(f, "<proc '{name}'>"),
         }
