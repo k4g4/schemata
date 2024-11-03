@@ -25,28 +25,26 @@ type ParseRes<'src, O> = nom::IResult<&'src I, O, ParserError>;
 const DELIMS: &[u8] = b"();\"'`|[]{} \r\t\n";
 
 pub fn repl(prelude: &I, input: &I) -> Result<()> {
+    let scope = Scope::new_global();
+
     let prelude_syns = read(syns)(prelude)?;
     let input_syns = read(syns)(input)?;
 
-    let scope = prelude_syns
-        .iter()
-        .try_fold(Scope::new_global(), |scope, syn| {
-            syn.eval(scope, Defs::Allowed).map(|(_, scope)| scope)
-        })?;
+    for syn in &prelude_syns {
+        syn.eval(&scope, Defs::Allowed)?;
+    }
 
-    input_syns.iter().try_fold(scope, |scope, syn| {
+    for syn in &input_syns {
         println!("Expression:");
         println!("{syn}");
         println!();
 
-        let (item, scope) = syn.eval(scope, Defs::Allowed)?;
+        let item = syn.eval(&scope, Defs::Allowed)?;
 
         println!("Evaluated:");
         println!("{item}");
         println!();
-
-        anyhow::Ok(scope)
-    })?;
+    }
 
     Ok(())
 }

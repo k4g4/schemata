@@ -5,7 +5,7 @@ use crate::{
 };
 use anyhow::{bail, ensure, Context, Result};
 use std::{
-    fmt,
+    f64, fmt,
     ops::{Add, Div, Mul, Sub},
     rc::Rc,
 };
@@ -148,6 +148,8 @@ pub struct List<'src> {
 pub enum Proc<'src> {
     Arith(Arith),
     Cmp(Cmp),
+    Log,
+    Exp,
     User {
         name: Option<&'src str>,
         params: Rc<[&'src str]>,
@@ -218,7 +220,9 @@ impl<'src> Proc<'src> {
                     return match arith {
                         Arith::Add => Ok(Item::Num(0.0)),
                         Arith::Mul => Ok(Item::Num(1.0)),
-                        Arith::Sub | Arith::Div => bail!("Wront number of arguments for <{arith}>"),
+                        Arith::Sub | Arith::Div => {
+                            bail!("Wrong number of arguments for {self}")
+                        }
                     };
                 }
                 // guard against div by zero
@@ -289,6 +293,39 @@ impl<'src> Proc<'src> {
                 Ok(Item::Token(if token { Token::True } else { Token::False }))
             }
 
+            Self::Log => {
+                let mut args = args;
+                let Some(operand) = args.next() else {
+                    bail!("Wrong number of arguments for {self}");
+                };
+                let Item::Num(operand) = operand else {
+                    bail!("{self} cannot operate on non-number");
+                };
+                let &Item::Num(base) = args.next().unwrap_or(&Item::Num(f64::consts::E)) else {
+                    bail!("{self} cannot operate on non-number");
+                };
+                ensure!(
+                    args.next().is_none(),
+                    "Wrong number of arguments for {self}"
+                );
+                Ok(Item::Num(operand.log(base)))
+            }
+
+            Self::Exp => {
+                let mut args = args;
+                let Some(exp) = args.next() else {
+                    bail!("Wrong number of arguments for {self}");
+                };
+                let Item::Num(exp) = exp else {
+                    bail!("{self} cannot operate on non-number");
+                };
+                ensure!(
+                    args.next().is_none(),
+                    "Wrong number of arguments for {self}"
+                );
+                Ok(Item::Num(exp.exp()))
+            }
+
             Self::User {
                 name,
                 params,
@@ -300,52 +337,41 @@ impl<'src> Proc<'src> {
                 if debug {
                     eprint!("{}(", name.unwrap_or(idents::LAMBDA));
                 }
-                let scope = {
-                    let mut args = args;
-                    let scope = params.iter().enumerate().try_fold(
-                        Scope::new_local(scope.clone()),
-                        |scope, (i, param)| {
-                            if let Some(item) = args.next() {
-                                if debug {
-                                    eprint!("{param}: {item}");
-                                    if i != params.len() - 1 {
-                                        eprint!(", ");
-                                    }
-                                }
-                                Ok(scope.add(param, item.clone()))
-                            } else {
-                                bail!("Expected {} parameter(s), got {i}", params.len());
+                let mut args = args;
+                let scope = Scope::new_local(scope);
+                for (i, param) in params.iter().enumerate() {
+                    if let Some(item) = args.next() {
+                        if debug {
+                            eprint!("{param}: {item}");
+                            if i != params.len() - 1 {
+                                eprint!(", ");
                             }
-                        },
-                    )?;
-                    ensure!(
-                        args.next().is_none(),
-                        "Too many parameters for {self}, expected {}",
-                        params.len()
-                    );
-
-                    if let Some(name) = name {
-                        scope.add(&name, Item::Proc(self.clone()))
+                        }
+                        scope.add(param, item.clone());
                     } else {
-                        scope
+                        bail!("Expected {} parameter(s), got {i}", params.len());
                     }
-                };
+                }
+                ensure!(
+                    args.next().is_none(),
+                    "Too many parameters for {self}, expected {}",
+                    params.len()
+                );
                 if debug {
                     eprintln!(")");
                 }
 
-                body.iter()
-                    .try_fold((Item::nil(), scope), |(_, scope), syn| {
-                        syn.eval(scope, Defs::Allowed)
-                            .with_context(|| format!("[while evaluating {self}]"))
-                    })
-                    .and_then(|(item, _)| {
-                        if let Item::Defined = item {
-                            bail!("Ill-placed '{}'", idents::DEFINE);
-                        } else {
-                            Ok(item)
-                        }
-                    })
+                let mut item = Item::nil();
+                for syn in *body {
+                    item = syn
+                        .eval(&scope, Defs::Allowed)
+                        .with_context(|| format!("[while evaluating {self}]"))?;
+                }
+                if matches!(item, Item::Defined) {
+                    bail!("Ill-placed '{}'", idents::DEFINE);
+                } else {
+                    Ok(item)
+                }
             }
         }
     }
@@ -355,7 +381,9 @@ impl fmt::Display for Proc<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Arith(arith) => write!(f, "<({arith})>"),
-            Self::Cmp(cmp) => write!(f, "<({cmp})'>"),
+            Self::Cmp(cmp) => write!(f, "<({cmp})>"),
+            Self::Log => write!(f, "<{}>", idents::LOG),
+            Self::Exp => write!(f, "<{}>", idents::EXP),
             Self::User { name: None, .. } => write!(f, "<{}>", idents::LAMBDA),
             Self::User {
                 name: Some(name), ..

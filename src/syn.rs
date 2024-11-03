@@ -44,17 +44,13 @@ pub enum Defs {
 }
 
 impl<'src> Syn<'src> {
-    pub fn eval(
-        &'src self,
-        scope: Rc<Scope<'src>>,
-        defs: Defs,
-    ) -> Result<(Item<'src>, Rc<Scope<'src>>)> {
+    pub fn eval(&'src self, scope: &Rc<Scope<'src>>, defs: Defs) -> Result<Item<'src>> {
         match self {
-            &Self::Num(n) => Ok((Item::Num(n), scope)),
+            &Self::Num(n) => Ok(Item::Num(n)),
 
             &Self::Ident(ident) => {
                 if let Some(lookup) = scope.lookup(ident) {
-                    Ok((lookup, scope))
+                    Ok(lookup)
                 } else {
                     let builtin = match ident {
                         idents::TRUE => Item::Token(Token::True),
@@ -71,32 +67,35 @@ impl<'src> Syn<'src> {
                         idents::LT => Item::Proc(Proc::Cmp(Cmp::Lt)),
                         idents::LE => Item::Proc(Proc::Cmp(Cmp::Le)),
 
+                        idents::LOG => Item::Proc(Proc::Log),
+                        idents::EXP => Item::Proc(Proc::Exp),
+
                         _ => {
                             bail!("Failed to find definition for '{ident}'");
                         }
                     };
 
-                    Ok((builtin, scope))
+                    Ok(builtin)
                 }
             }
 
             Self::Reserved(reserved) => bail!("Unexpected '{reserved}'"),
 
             Self::Group(group) => match group.as_slice() {
-                [] => Ok((Item::nil(), scope)),
+                [] => Ok(Item::nil()),
 
                 [Self::Reserved(Reserved::Define), ..] if defs == Defs::NotAllowed => {
                     bail!("Ill-placed '{}'", idents::DEFINE);
                 }
 
                 [Self::Reserved(Reserved::Define), Self::Ident(ident), def] => {
-                    let (item, scope) = def.eval(scope, Defs::NotAllowed)?;
-                    Ok((Item::Defined, scope.add(ident, item)))
+                    let item = def.eval(scope, Defs::NotAllowed)?;
+                    scope.add(ident, item);
+                    Ok(Item::Defined)
                 }
 
-                [Self::Reserved(Reserved::Define), Self::Group(signature), body @ ..]
-                    if !body.is_empty() =>
-                {
+                [Self::Reserved(Reserved::Define), Self::Group(signature), body @ ..] => {
+                    ensure!(!body.is_empty(), "Empty procedure body");
                     match signature.as_slice() {
                         [Self::Ident(ident), params @ ..] => {
                             let params = params
@@ -109,19 +108,14 @@ impl<'src> Syn<'src> {
                                     }
                                 })
                                 .collect::<Result<_, _>>()?;
-
-                            Ok((
-                                Item::Defined,
-                                scope.clone().add(
-                                    ident,
-                                    Item::Proc(Proc::User {
-                                        name: Some(ident),
-                                        params,
-                                        scope,
-                                        body,
-                                    }),
-                                ),
-                            ))
+                            let proc = Item::Proc(Proc::User {
+                                name: Some(ident),
+                                params,
+                                scope: scope.clone(),
+                                body,
+                            });
+                            scope.add(ident, proc);
+                            Ok(Item::Defined)
                         }
 
                         _ => bail!("Malformed signature"),
@@ -133,7 +127,6 @@ impl<'src> Syn<'src> {
                 }
 
                 [Self::Reserved(Reserved::Cond), conds @ ..] if !conds.is_empty() => {
-                    let mut scope = scope;
                     for (i, cond) in conds.iter().enumerate() {
                         if let Self::Group(group) = cond {
                             match group.as_slice() {
@@ -145,33 +138,23 @@ impl<'src> Syn<'src> {
 
                                 [Self::Reserved(Reserved::Else), syn, syns @ ..] => {
                                     return if i == conds.len() - 1 {
-                                        syns.iter()
-                                            .try_fold(
-                                                syn.eval(scope, Defs::NotAllowed)?,
-                                                |(_, scope), syn| syn.eval(scope, Defs::NotAllowed),
-                                            )
-                                            .and_then(|(item, scope)| Ok((item.apply()?, scope)))
+                                        let mut item = syn.eval(scope, Defs::NotAllowed)?;
+                                        for syn in syns {
+                                            item = syn.eval(scope, Defs::NotAllowed)?;
+                                        }
+                                        item.apply()
                                     } else {
                                         bail!("Ill-placed '{}'", idents::ELSE);
                                     };
                                 }
 
                                 [cond, syns @ ..] => {
-                                    scope = {
-                                        let (cond, scope) = cond.eval(scope, Defs::NotAllowed)?;
-                                        let cond = cond.apply()?;
-
-                                        if cond.is_truthy() {
-                                            return syns
-                                                .iter()
-                                                .try_fold((cond, scope), |(_, scope), syn| {
-                                                    syn.eval(scope, Defs::NotAllowed)
-                                                })
-                                                .and_then(|(item, scope)| {
-                                                    Ok((item.apply()?, scope))
-                                                });
+                                    let mut item = cond.eval(scope, Defs::NotAllowed)?.apply()?;
+                                    if item.is_truthy() {
+                                        for syn in syns {
+                                            item = syn.eval(scope, Defs::NotAllowed)?;
                                         }
-                                        scope
+                                        return item.apply();
                                     }
                                 }
                             }
@@ -187,14 +170,11 @@ impl<'src> Syn<'src> {
 
                 [Self::Reserved(Reserved::If), syns @ ..] => {
                     ensure!(matches!(syns.len(), 2 | 3), "Malformed '{}'", idents::IF);
-                    let (cond, scope) = syns[0].eval(scope, Defs::NotAllowed)?;
-                    let cond = cond.apply()?;
+                    let cond = syns[0].eval(scope, Defs::NotAllowed)?.apply()?;
                     if cond.is_truthy() {
-                        let (conseq, scope) = syns[1].eval(scope, Defs::NotAllowed)?;
-                        Ok((conseq.apply()?, scope))
+                        syns[1].eval(scope, Defs::NotAllowed)?.apply()
                     } else if let Some(alt) = syns.get(2) {
-                        let (alt, scope) = alt.eval(scope, Defs::NotAllowed)?;
-                        Ok((alt.apply()?, scope))
+                        alt.eval(scope, Defs::NotAllowed)?.apply()
                     } else {
                         bail!(
                             "No alternative value for '{}' with {} predicate",
@@ -209,26 +189,25 @@ impl<'src> Syn<'src> {
                     let initial = Item::Token(if is_and { Token::False } else { Token::True });
 
                     syns.iter()
-                        .try_fold((false, initial, scope), |(done, prev, scope), syn| {
+                        .try_fold((false, initial), |(done, prev), syn| {
                             if done {
-                                Ok((true, prev, scope))
+                                Ok((true, prev))
                             } else {
-                                let (item, scope) = syn.eval(scope, Defs::NotAllowed)?;
-                                let item = item.apply()?;
+                                let item = syn.eval(scope, Defs::NotAllowed)?.apply()?;
                                 let done = item.is_truthy() ^ is_and;
-                                Ok((done, item, scope))
+                                Ok((done, item))
                             }
                         })
-                        .map(|(_, item, scope)| (item, scope))
+                        .map(|(_, item)| item)
                 }
 
                 _ => group
                     .iter()
-                    .try_rfold((Item::nil(), scope), |(tail, scope), syn| {
+                    .try_rfold(Item::nil(), |tail, syn| {
                         syn.eval(scope, Defs::NotAllowed)
-                            .map(|(head, scope)| (Item::cons(head, tail), scope))
+                            .map(|head| Item::cons(head, tail))
                     })
-                    .and_then(|(item, scope)| Ok((item.apply()?, scope))),
+                    .and_then(Item::apply),
             },
         }
     }
