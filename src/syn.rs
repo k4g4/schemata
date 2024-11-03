@@ -1,6 +1,7 @@
 use crate::{
     idents,
-    item::{Arith, Cmp, Item, Proc, Token},
+    item::{Item, Token},
+    proc::{Arith, Cmp, Proc, Trig},
     scope::Scope,
 };
 use anyhow::{bail, ensure, Result};
@@ -77,6 +78,22 @@ impl<'src> Syn<'src> {
                         idents::LOG => Item::Proc(Proc::Log),
                         idents::EXP => Item::Proc(Proc::Exp),
                         idents::REM => Item::Proc(Proc::Rem),
+                        idents::TRUNC => Item::Proc(Proc::Trunc),
+                        idents::FLOOR => Item::Proc(Proc::Floor),
+                        idents::CEIL => Item::Proc(Proc::Ceil),
+
+                        idents::SIN => Item::Proc(Proc::Trig(Trig::Sin)),
+                        idents::COS => Item::Proc(Proc::Trig(Trig::Cos)),
+                        idents::TAN => Item::Proc(Proc::Trig(Trig::Tan)),
+                        idents::ASIN => Item::Proc(Proc::Trig(Trig::Asin)),
+                        idents::ACOS => Item::Proc(Proc::Trig(Trig::Acos)),
+                        idents::ATAN => Item::Proc(Proc::Trig(Trig::Atan)),
+                        idents::SINH => Item::Proc(Proc::Trig(Trig::Sinh)),
+                        idents::COSH => Item::Proc(Proc::Trig(Trig::Cosh)),
+                        idents::TANH => Item::Proc(Proc::Trig(Trig::Tanh)),
+                        idents::ASINH => Item::Proc(Proc::Trig(Trig::Asinh)),
+                        idents::ACOSH => Item::Proc(Proc::Trig(Trig::Acosh)),
+                        idents::ATANH => Item::Proc(Proc::Trig(Trig::Atanh)),
 
                         idents::ERROR => Item::Proc(Proc::Error),
 
@@ -120,7 +137,7 @@ impl<'src> Syn<'src> {
                             let proc = Item::Proc(Proc::Compound {
                                 name: Some(ident),
                                 params,
-                                scope: scope.clone().into(),
+                                scope_handle: scope.get_handle(),
                                 body,
                             });
                             scope.add(ident, proc)?;
@@ -150,7 +167,7 @@ impl<'src> Syn<'src> {
                     Ok(Item::Proc(Proc::Compound {
                         name: None,
                         params,
-                        scope: scope.clone().into(),
+                        scope_handle: scope.get_handle(),
                         body,
                     }))
                 }
@@ -186,7 +203,7 @@ impl<'src> Syn<'src> {
                         let proc = Item::Proc(Proc::Compound {
                             name: None,
                             params,
-                            scope: scope.clone().into(),
+                            scope_handle: scope.get_handle(),
                             body,
                         });
                         let mut defs = defs

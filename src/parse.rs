@@ -8,7 +8,10 @@ use anyhow::Result;
 use core::str;
 use nom::{
     branch::{alt, Alt},
-    bytes::complete::{tag, take_till1, take_until},
+    bytes::{
+        complete::{tag, take_till1, take_until},
+        streaming,
+    },
     character::complete::{char, multispace0, one_of},
     combinator::{all_consuming, cut, map, map_res, not, peek, value},
     error::context,
@@ -50,11 +53,28 @@ pub fn repl(prelude: &I, input: &I) -> Result<()> {
     Ok(())
 }
 
-fn read<'a, O>(mut parser: impl FnMut(&'a I) -> ParseRes<O>) -> impl FnMut(&'a I) -> Result<O> {
-    move |input| match parser(input) {
+fn read<'a, O>(mut parser: impl Parser<&'a I, O, ParserError>) -> impl FnMut(&'a I) -> Result<O> {
+    move |input| match parser.parse(input) {
         Ok((_, out)) => Ok(out),
         Err(nom::Err::Error(error) | nom::Err::Failure(error)) => Err(error.into()),
         Err(nom::Err::Incomplete(_)) => Err(ParserError::Unexpected.into()),
+    }
+}
+
+fn allow_incomplete<'a, O>(
+    mut parser: impl Parser<&'a I, O, ParserError>,
+) -> impl FnMut(&'a I) -> ParseRes<Option<O>> {
+    move |input| {
+        parser
+            .parse(input)
+            .map(|(input, output)| (input, Some(output)))
+            .or_else(|err| {
+                if err.is_incomplete() {
+                    Ok((&[], None))
+                } else {
+                    Err(err)
+                }
+            })
     }
 }
 
@@ -63,7 +83,10 @@ fn syns(input: &I) -> ParseRes<Vec<Syn>> {
 }
 
 fn comment(input: &I) -> ParseRes<()> {
-    value((), tag(";;").and(take_until("\n")).and(tag("\n")))(input)
+    value(
+        (),
+        allow_incomplete(tag(";;").and(streaming::take_until("\n")).and(tag("\n"))),
+    )(input)
 }
 
 fn ignore(input: &I) -> ParseRes<()> {

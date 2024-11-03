@@ -3,6 +3,7 @@ mod globals;
 mod idents;
 mod item;
 mod parse;
+mod proc;
 mod scope;
 mod syn;
 

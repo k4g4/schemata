@@ -6,6 +6,22 @@ pub const DIV: &str = "/";
 pub const LOG: &str = "log";
 pub const EXP: &str = "exp";
 pub const REM: &str = "remainder";
+pub const TRUNC: &str = "truncate";
+pub const FLOOR: &str = "floor";
+pub const CEIL: &str = "ceiling";
+
+pub const SIN: &str = "sin";
+pub const COS: &str = "cos";
+pub const TAN: &str = "tan";
+pub const ASIN: &str = "asin";
+pub const ACOS: &str = "acos";
+pub const ATAN: &str = "atan";
+pub const SINH: &str = "sinh";
+pub const COSH: &str = "cosh";
+pub const TANH: &str = "tanh";
+pub const ASINH: &str = "asinh";
+pub const ACOSH: &str = "acosh";
+pub const ATANH: &str = "atanh";
 
 pub const ERROR: &str = "error";
 

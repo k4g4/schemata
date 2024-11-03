@@ -1,22 +1,13 @@
-use crate::item::{Item, StoredItem};
-use anyhow::{anyhow, Context, Result};
+use crate::{item::Item, proc::Proc};
+use anyhow::{anyhow, Result};
 use rustc_hash::FxHashMap;
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},
 };
 
-// Scopes act as an environment for each item, including compound procedures.
-// These compound procedures need to be able to refer to their own scope, which means
-// they need references to the scope... creating circular dependencies that might
-// leak memory when just using Rc. This file provides StoredScope and BorrowedScope
-// handles that keep track of the ID for their original scope. If an item is
-// stored in a scope, it must only hold a StoredScope. If an item is looked up
-// from a scope, it will hold a BorrowedScope. While a StoredScope is stored
-// in the scope it originated from, it will remain downgraded to a weak reference.
-
 #[derive(PartialEq, Copy, Clone, Debug)]
-pub struct ScopeId(usize);
+struct ScopeId(usize);
 
 fn new_id() -> ScopeId {
     thread_local! {
@@ -31,7 +22,7 @@ fn new_id() -> ScopeId {
 pub struct Scope<'src> {
     id: ScopeId,
     parent: Option<Rc<Scope<'src>>>,
-    defs: RefCell<FxHashMap<&'src str, StoredItem<'src>>>,
+    defs: RefCell<FxHashMap<&'src str, Item<'src>>>,
 }
 
 impl<'src> Scope<'src> {
@@ -43,12 +34,20 @@ impl<'src> Scope<'src> {
         })
     }
 
-    pub fn new_local(parent: impl AsRef<Rc<Scope<'src>>>) -> Rc<Self> {
-        Rc::new(Self {
-            id: new_id(),
-            parent: Some(parent.as_ref().clone()),
-            defs: Default::default(),
-        })
+    pub fn new_local(parent: &ScopeHandle<'src>) -> Result<Rc<Self>> {
+        if let ScopeHandle::Strong(_, scope) = parent {
+            Ok(Rc::new(Self {
+                id: new_id(),
+                parent: Some(scope.clone()),
+                defs: Default::default(),
+            }))
+        } else {
+            Err(anyhow!("Unexpected weak ScopeHandle"))
+        }
+    }
+
+    pub fn get_handle(self: &Rc<Self>) -> ScopeHandle<'src> {
+        ScopeHandle::Strong(self.id, self.clone())
     }
 
     pub fn lookup(self: &Rc<Self>, ident: &str) -> Result<Option<Item<'src>>> {
@@ -56,7 +55,22 @@ impl<'src> Scope<'src> {
             .borrow()
             .get(ident)
             .cloned()
-            .map(|item| item.into_borrowed(self.id))
+            .map(|mut item| {
+                // Always return a strong scope handle
+                if let Item::Proc(Proc::Compound {
+                    scope_handle: scope,
+                    ..
+                }) = &mut item
+                {
+                    if let ScopeHandle::Weak(weak_scope) = scope {
+                        let strong_scope = weak_scope
+                            .upgrade()
+                            .ok_or_else(|| anyhow!("failed to upgrade scope handle"))?;
+                        *scope = ScopeHandle::Strong(self.id, strong_scope);
+                    }
+                }
+                Ok(item)
+            })
             .or_else(|| {
                 self.parent
                     .as_ref()
@@ -65,15 +79,21 @@ impl<'src> Scope<'src> {
             .transpose()
     }
 
-    pub fn add(self: &Rc<Self>, ident: &'src str, item: Item<'src>) -> Result<()> {
-        // Global scope allows renaming variables, local scopes do not
-        if self
-            .defs
-            .borrow_mut()
-            .insert(ident, item.into_stored(self.id))
-            .is_some()
-            && self.parent.is_some()
+    pub fn add(self: &Rc<Self>, ident: &'src str, mut item: Item<'src>) -> Result<()> {
+        // Insert a weak scope handle if there's a matching ID
+        if let Item::Proc(Proc::Compound {
+            scope_handle: scope,
+            ..
+        }) = &mut item
         {
+            if let ScopeHandle::Strong(id, strong_scope) = scope {
+                if *id == self.id {
+                    *scope = ScopeHandle::Weak(Rc::downgrade(strong_scope));
+                }
+            }
+        }
+        // Global scope allows renaming variables, local scopes do not
+        if self.defs.borrow_mut().insert(ident, item).is_some() && self.parent.is_some() {
             Err(anyhow!("Duplicate definition for '{ident}'"))
         } else {
             Ok(())
@@ -81,51 +101,9 @@ impl<'src> Scope<'src> {
     }
 }
 
+#[expect(private_interfaces)]
 #[derive(Clone, Debug)]
-pub enum StoredScope<'src> {
+pub enum ScopeHandle<'src> {
     Strong(ScopeId, Rc<Scope<'src>>),
     Weak(Weak<Scope<'src>>),
-}
-
-impl<'src> StoredScope<'src> {
-    pub fn into_borrowed(self, id: ScopeId) -> Result<BorrowedScope<'src>> {
-        match self {
-            Self::Strong(self_id, scope) => Ok(BorrowedScope { id: self_id, scope }),
-            Self::Weak(scope) => Ok(BorrowedScope {
-                id,
-                scope: scope.upgrade().context("While upgrading scope")?,
-            }),
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct BorrowedScope<'src> {
-    id: ScopeId,
-    scope: Rc<Scope<'src>>,
-}
-
-impl<'src> BorrowedScope<'src> {
-    pub fn into_stored(self, id: ScopeId) -> StoredScope<'src> {
-        if id == self.id {
-            StoredScope::Weak(Rc::downgrade(&self.scope))
-        } else {
-            StoredScope::Strong(self.id, self.scope)
-        }
-    }
-}
-
-impl<'src> AsRef<Rc<Scope<'src>>> for BorrowedScope<'src> {
-    fn as_ref(&self) -> &Rc<Scope<'src>> {
-        &self.scope
-    }
-}
-
-impl<'src> From<Rc<Scope<'src>>> for BorrowedScope<'src> {
-    fn from(scope: Rc<Scope<'src>>) -> Self {
-        Self {
-            id: scope.id,
-            scope,
-        }
-    }
 }
