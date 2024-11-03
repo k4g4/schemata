@@ -7,6 +7,8 @@ pub const LOG: &str = "log";
 pub const EXP: &str = "exp";
 pub const REM: &str = "remainder";
 
+pub const ERROR: &str = "error";
+
 pub const TRUE: &str = "#t";
 pub const FALSE: &str = "#f";
 

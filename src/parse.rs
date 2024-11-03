@@ -5,18 +5,19 @@ use crate::{
     syn::{Defs, Reserved, Syn},
 };
 use anyhow::Result;
+use core::str;
 use nom::{
     branch::{alt, Alt},
     bytes::complete::{tag, take_till1, take_until},
     character::complete::{char, multispace0, one_of},
-    combinator::{all_consuming, cut, map_res, not, peek, value},
+    combinator::{all_consuming, cut, map, map_res, not, peek, value},
     error::context,
     multi::{many0, many0_count},
     number::complete::double,
     sequence::{delimited, pair, preceded, terminated},
     Parser,
 };
-use std::str;
+use std::borrow::Cow;
 
 type I = [u8];
 
@@ -75,6 +76,7 @@ fn syn(input: &I) -> ParseRes<Syn> {
         double.map(Syn::Num),
         token.map(Syn::Ident),
         context("identifier", ident).map(Syn::Ident),
+        context("string", string).map(Syn::String),
         context("list", list).map(Syn::Group),
     );
     delimited(ignore, alt(syn_parsers), ignore)(input)
@@ -90,6 +92,7 @@ fn reserved(input: &I) -> ParseRes<Reserved> {
     any_delim((
         value(Reserved::Define, tag(idents::DEFINE)),
         value(Reserved::Lambda, tag(idents::LAMBDA)),
+        value(Reserved::Let, tag(idents::LET)),
         value(Reserved::Cond, tag(idents::COND)),
         value(Reserved::Else, tag(idents::ELSE)),
         value(Reserved::If, tag(idents::IF)),
@@ -112,6 +115,13 @@ fn ident(input: &I) -> ParseRes<&str> {
             take_till1(|c| DELIMS.contains(&c)),
         ),
         str::from_utf8,
+    )(input)
+}
+
+fn string(input: &I) -> ParseRes<Cow<'_, str>> {
+    map(
+        delimited(char::<_, ParserError>('"'), take_until("\""), char('"')),
+        String::from_utf8_lossy,
     )(input)
 }
 

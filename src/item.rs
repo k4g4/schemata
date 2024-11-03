@@ -5,6 +5,7 @@ use crate::{
 };
 use anyhow::{anyhow, bail, ensure, Context, Error, Result};
 use std::{
+    borrow::Cow,
     f64, fmt,
     ops::{Add, Div, Mul, Sub},
     rc::Rc,
@@ -13,6 +14,7 @@ use std::{
 #[derive(Clone, Debug)]
 pub enum ItemScopeGeneric<'src, Proc> {
     Num(f64),
+    String(Cow<'src, str>),
     List(Option<Rc<List<'src>>>),
     Proc(Proc),
     Token(Token),
@@ -27,6 +29,7 @@ impl<'src> StoredItem<'src> {
     pub fn into_borrowed(self, id: ScopeId) -> Result<Item<'src>> {
         Ok(match self {
             Self::Num(num) => Item::Num(num),
+            Self::String(string) => Item::String(string),
             Self::List(list) => Item::List(list),
             Self::Proc(proc) => Item::Proc(proc.into_borrowed(id)?),
             Self::Token(token) => Item::Token(token),
@@ -55,8 +58,16 @@ impl<'src> Item<'src> {
         Self::List(None)
     }
 
-    pub fn cons(head: Item<'src>, tail: Item<'src>) -> Self {
+    pub fn cons(head: Self, tail: Self) -> Self {
         Self::List(Some(Rc::new(List { head, tail })))
+    }
+
+    pub fn from_items(
+        items: impl IntoIterator<IntoIter = impl DoubleEndedIterator<Item = Result<Self>>>,
+    ) -> Result<Self> {
+        items
+            .into_iter()
+            .try_rfold(Item::nil(), |tail, head| Ok(Item::cons(head?, tail)))
     }
 
     pub fn is_truthy(&self) -> bool {
@@ -66,6 +77,7 @@ impl<'src> Item<'src> {
     pub fn into_stored(self, id: ScopeId) -> StoredItem<'src> {
         match self {
             Self::Num(num) => StoredItem::Num(num),
+            Self::String(string) => StoredItem::String(string),
             Self::List(list) => StoredItem::List(list),
             Self::Proc(proc) => StoredItem::Proc(proc.into_stored(id)),
             Self::Token(token) => StoredItem::Token(token),
@@ -112,6 +124,7 @@ impl fmt::Display for Item<'_> {
 
         match self {
             Self::Num(num) => write!(f, "{num}"),
+            Self::String(string) => write!(f, "\"{string}\""),
             Self::Proc(proc) => write!(f, "{proc}"),
             Self::Token(token) => write!(f, "{token}"),
             Self::Defined => write!(f, "<{}>", idents::DEFINE),
@@ -206,6 +219,7 @@ pub enum ProcScopeGeneric<'src, Scope> {
     Log,
     Exp,
     Rem,
+    Error,
     Compound {
         name: Option<&'src str>,
         params: Rc<[&'src str]>,
@@ -226,6 +240,7 @@ impl<'src> StoredProc<'src> {
             Self::Log => Proc::Log,
             Self::Exp => Proc::Exp,
             Self::Rem => Proc::Rem,
+            Self::Error => Proc::Error,
             Self::Compound {
                 name,
                 params,
@@ -249,6 +264,7 @@ impl<'src> Proc<'src> {
             Self::Log => StoredProc::Log,
             Self::Exp => StoredProc::Exp,
             Self::Rem => StoredProc::Rem,
+            Self::Error => StoredProc::Error,
             Self::Compound {
                 name,
                 params,
@@ -302,6 +318,14 @@ impl<'src> Proc<'src> {
                     bail!("Wrong number of arguments for {self}");
                 };
                 Ok(Item::Num(first % second))
+            }
+
+            Self::Error => {
+                ensure!(
+                    args.clone().count() > 0,
+                    "Wrong number of arguments for {self}"
+                );
+                bail!(args.map(|arg| format!("{arg} ")).collect::<String>())
             }
 
             Self::Compound {
@@ -364,6 +388,7 @@ impl fmt::Display for Proc<'_> {
             Self::Log => write!(f, "<{}>", idents::LOG),
             Self::Exp => write!(f, "<{}>", idents::EXP),
             Self::Rem => write!(f, "<{}>", idents::REM),
+            Self::Error => write!(f, "<{}>", idents::ERROR),
             Self::Compound { name: None, .. } => write!(f, "<{}>", idents::LAMBDA),
             Self::Compound {
                 name: Some(name), ..
@@ -382,8 +407,7 @@ pub enum Arith {
 
 impl Arith {
     fn apply<'src>(self, args: NumsIter<'_, 'src>) -> Result<Item<'src>> {
-        // guard against 0 args
-        if args.clone().next().is_none() {
+        if args.clone().count() == 0 {
             return match self {
                 Self::Add => Ok(Item::Num(0.0)),
                 Self::Mul => Ok(Item::Num(1.0)),
@@ -392,13 +416,11 @@ impl Arith {
                 }
             };
         }
-        // guard against div by zero
         ensure!(
             !(self == Self::Div && args.clone().any(|item| item == 0.0)),
             "Cannot divide by zero"
         );
-        // guard against 1 arg
-        if args.clone().skip(1).next().is_none() {
+        if args.clone().count() == 1 {
             return match (self, args.clone().next()) {
                 (Self::Add | Self::Mul, Some(num)) => Ok(Item::Num(num)),
                 (Self::Sub, Some(num)) => Ok(Item::Num(-num)),

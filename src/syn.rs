@@ -4,11 +4,12 @@ use crate::{
     scope::Scope,
 };
 use anyhow::{bail, ensure, Result};
-use std::{fmt, rc::Rc};
+use std::{borrow::Cow, collections::VecDeque, fmt, rc::Rc};
 
 #[derive(Clone, Debug)]
 pub enum Syn<'src> {
     Num(f64),
+    String(Cow<'src, str>),
     Ident(&'src str),
     Reserved(Reserved),
     Group(Vec<Syn<'src>>),
@@ -18,6 +19,7 @@ pub enum Syn<'src> {
 pub enum Reserved {
     Define,
     Lambda,
+    Let,
     Cond,
     Else,
     If,
@@ -30,6 +32,7 @@ impl fmt::Display for Reserved {
         match self {
             Self::Define => write!(f, "{}", idents::DEFINE),
             Self::Lambda => write!(f, "{}", idents::LAMBDA),
+            Self::Let => write!(f, "{}", idents::LET),
             Self::Cond => write!(f, "{}", idents::COND),
             Self::Else => write!(f, "{}", idents::ELSE),
             Self::If => write!(f, "{}", idents::IF),
@@ -49,6 +52,8 @@ impl<'src> Syn<'src> {
     pub fn eval(&'src self, scope: &Rc<Scope<'src>>, defs: Defs) -> Result<Item<'src>> {
         match self {
             &Self::Num(n) => Ok(Item::Num(n)),
+
+            Self::String(string) => Ok(Item::String(string.clone())),
 
             &Self::Ident(ident) => {
                 if let Some(lookup) = scope.lookup(ident)? {
@@ -72,6 +77,8 @@ impl<'src> Syn<'src> {
                         idents::LOG => Item::Proc(Proc::Log),
                         idents::EXP => Item::Proc(Proc::Exp),
                         idents::REM => Item::Proc(Proc::Rem),
+
+                        idents::ERROR => Item::Proc(Proc::Error),
 
                         _ => {
                             bail!("Failed to find definition for '{ident}'");
@@ -97,7 +104,7 @@ impl<'src> Syn<'src> {
                 }
 
                 [Self::Reserved(Reserved::Define), Self::Group(signature), body @ ..] => {
-                    ensure!(!body.is_empty(), "Empty procedure body");
+                    ensure!(!body.is_empty(), "Empty '{}' body", idents::DEFINE);
                     match signature.as_slice() {
                         [Self::Ident(ident), params @ ..] => {
                             let params = params
@@ -109,7 +116,7 @@ impl<'src> Syn<'src> {
                                         bail!("'{param}' is not a valid parameter name");
                                     }
                                 })
-                                .collect::<Result<_, _>>()?;
+                                .collect::<Result<_>>()?;
                             let proc = Item::Proc(Proc::Compound {
                                 name: Some(ident),
                                 params,
@@ -129,7 +136,7 @@ impl<'src> Syn<'src> {
                 }
 
                 [Self::Reserved(Reserved::Lambda), Self::Group(params), body @ ..] => {
-                    ensure!(!body.is_empty(), "Empty procedure body");
+                    ensure!(!body.is_empty(), "Empty '{}' body", idents::LAMBDA);
                     let params = params
                         .iter()
                         .map(|param| {
@@ -139,7 +146,7 @@ impl<'src> Syn<'src> {
                                 bail!("'{param}' is not a valid parameter name");
                             }
                         })
-                        .collect::<Result<_, _>>()?;
+                        .collect::<Result<_>>()?;
                     Ok(Item::Proc(Proc::Compound {
                         name: None,
                         params,
@@ -150,6 +157,49 @@ impl<'src> Syn<'src> {
 
                 [Self::Reserved(Reserved::Lambda), ..] => {
                     bail!("Malformed '{}'", idents::LAMBDA)
+                }
+
+                [Self::Reserved(Reserved::Let), Self::Group(mappings), body @ ..] => {
+                    ensure!(!body.is_empty(), "Empty '{}' body", idents::LET);
+                    let params = mappings
+                        .iter()
+                        .map(|mapping| {
+                            if let Syn::Group(group) = mapping {
+                                if let &[Self::Ident(param), _] = group.as_slice() {
+                                    Ok(param)
+                                } else {
+                                    bail!("Malformed '{}'", idents::LET);
+                                }
+                            } else {
+                                bail!("Malformed '{}'", idents::LET);
+                            }
+                        })
+                        .collect::<Result<_>>()?;
+                    let defs = mappings.iter().map(|mapping| {
+                        if let Syn::Group(group) = mapping {
+                            &group[1]
+                        } else {
+                            unreachable!("already checked")
+                        }
+                    });
+                    let lambda = {
+                        let proc = Item::Proc(Proc::Compound {
+                            name: None,
+                            params,
+                            scope: scope.clone().into(),
+                            body,
+                        });
+                        let mut defs = defs
+                            .map(|def| def.eval(scope, Defs::NotAllowed))
+                            .collect::<VecDeque<_>>();
+                        defs.push_front(Ok(proc));
+                        Item::from_items(defs)?
+                    };
+                    lambda.apply()
+                }
+
+                [Self::Reserved(Reserved::Let), ..] => {
+                    bail!("Malformed '{}'", idents::LET)
                 }
 
                 [Self::Reserved(Reserved::Cond), conds @ ..] if !conds.is_empty() => {
@@ -227,12 +277,7 @@ impl<'src> Syn<'src> {
                         .map(|(_, item)| item)
                 }
 
-                _ => group
-                    .iter()
-                    .try_rfold(Item::nil(), |tail, syn| {
-                        syn.eval(scope, Defs::NotAllowed)
-                            .map(|head| Item::cons(head, tail))
-                    })
+                _ => Item::from_items(group.iter().map(|syn| syn.eval(scope, Defs::NotAllowed)))
                     .and_then(Item::apply),
             },
         }
@@ -252,6 +297,7 @@ impl fmt::Display for Syn<'_> {
 
         match self {
             Self::Num(num) => write!(f, "{num}"),
+            Self::String(string) => write!(f, "\"{string}\""),
             Self::Ident(ident) => write!(f, "{ident}"),
             Self::Reserved(reserved) => write!(f, "{reserved}"),
             Self::Group(items) if items.is_empty() => write!(f, "()"),
