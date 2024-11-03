@@ -35,3 +35,6 @@
             a
             (fib_ b (+ a b) (- i 1))))
     (fib_ 0 1 n))
+
+(define (identity x) x)
+

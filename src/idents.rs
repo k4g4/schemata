@@ -17,9 +17,10 @@ pub const LT: &str = "<";
 pub const LE: &str = "<=";
 
 pub const DEFINE: &str = "define";
+pub const LAMBDA: &str = "lambda";
+pub const LET: &str = "let";
 pub const COND: &str = "cond";
 pub const ELSE: &str = "else";
 pub const IF: &str = "if";
 pub const AND: &str = "and";
 pub const OR: &str = "or";
-pub const LAMBDA: &str = "lambda";

@@ -17,6 +17,7 @@ pub enum Syn<'src> {
 #[derive(PartialEq, Copy, Clone, Debug)]
 pub enum Reserved {
     Define,
+    Lambda,
     Cond,
     Else,
     If,
@@ -28,6 +29,7 @@ impl fmt::Display for Reserved {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Define => write!(f, "{}", idents::DEFINE),
+            Self::Lambda => write!(f, "{}", idents::LAMBDA),
             Self::Cond => write!(f, "{}", idents::COND),
             Self::Else => write!(f, "{}", idents::ELSE),
             Self::If => write!(f, "{}", idents::IF),
@@ -124,6 +126,30 @@ impl<'src> Syn<'src> {
 
                 [Self::Reserved(Reserved::Define), ..] => {
                     bail!("Malformed '{}'", idents::DEFINE)
+                }
+
+                [Self::Reserved(Reserved::Lambda), Self::Group(params), body @ ..] => {
+                    ensure!(!body.is_empty(), "Empty procedure body");
+                    let params = params
+                        .iter()
+                        .map(|param| {
+                            if let &Syn::Ident(ident) = param {
+                                Ok(ident)
+                            } else {
+                                bail!("'{param}' is not a valid parameter name");
+                            }
+                        })
+                        .collect::<Result<_, _>>()?;
+                    Ok(Item::Proc(Proc::Compound {
+                        name: None,
+                        params,
+                        scope: scope.clone().into(),
+                        body,
+                    }))
+                }
+
+                [Self::Reserved(Reserved::Lambda), ..] => {
+                    bail!("Malformed '{}'", idents::LAMBDA)
                 }
 
                 [Self::Reserved(Reserved::Cond), conds @ ..] if !conds.is_empty() => {

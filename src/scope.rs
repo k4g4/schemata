@@ -7,7 +7,7 @@ use std::{
 };
 
 // Scopes act as an environment for each item, including compound procedures.
-// These compound procedures need to be able to refer to themselves, which means
+// These compound procedures need to be able to refer to their own scope, which means
 // they need references to the scope... creating circular dependencies that might
 // leak memory when just using Rc. This file provides StoredScope and BorrowedScope
 // handles that keep track of the ID for their original scope. If an item is

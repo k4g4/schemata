@@ -89,6 +89,7 @@ fn any_delim<'i, O>(
 fn reserved(input: &I) -> ParseRes<Reserved> {
     any_delim((
         value(Reserved::Define, tag(idents::DEFINE)),
+        value(Reserved::Lambda, tag(idents::LAMBDA)),
         value(Reserved::Cond, tag(idents::COND)),
         value(Reserved::Else, tag(idents::ELSE)),
         value(Reserved::If, tag(idents::IF)),
