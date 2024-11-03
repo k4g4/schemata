@@ -49,7 +49,7 @@ impl<'src> Syn<'src> {
             &Self::Num(n) => Ok(Item::Num(n)),
 
             &Self::Ident(ident) => {
-                if let Some(lookup) = scope.lookup(ident) {
+                if let Some(lookup) = scope.lookup(ident)? {
                     Ok(lookup)
                 } else {
                     let builtin = match ident {
@@ -111,7 +111,7 @@ impl<'src> Syn<'src> {
                             let proc = Item::Proc(Proc::Compound {
                                 name: Some(ident),
                                 params,
-                                scope: scope.clone(),
+                                scope: scope.clone().into(),
                                 body,
                             });
                             scope.add(ident, proc)?;

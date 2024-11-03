@@ -11,6 +11,7 @@
 (define (even? x) (= (remainder x 2) 0))
 
 (define (square x) (* x x))
+(define (cube x) (* x x x))
 
 (define (sqrt x)
     (define e .00001)
