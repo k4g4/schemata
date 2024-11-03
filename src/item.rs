@@ -3,7 +3,7 @@ use crate::{
     scope::Scope,
     syn::{Defs, Syn},
 };
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Error, Result};
 use std::{
     f64, fmt,
     ops::{Add, Div, Mul, Sub},
@@ -139,6 +139,35 @@ impl<'a, 'src> Iterator for HeadsIter<'a, 'src> {
 }
 
 #[derive(Clone, Debug)]
+struct NumsIter<'a, 'src>(HeadsIter<'a, 'src>);
+
+impl<'a, 'src> TryFrom<HeadsIter<'a, 'src>> for NumsIter<'a, 'src> {
+    type Error = Error;
+
+    fn try_from(heads_iter: HeadsIter<'a, 'src>) -> Result<Self> {
+        ensure!(
+            heads_iter.clone().all(|item| matches!(item, Item::Num(_))),
+            "cannot operate on non-number"
+        );
+        Ok(Self(heads_iter))
+    }
+}
+
+impl<'a, 'src> Iterator for NumsIter<'a, 'src> {
+    type Item = f64;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|item| {
+            if let &Item::Num(n) = item {
+                n
+            } else {
+                panic!("NumsIter invariant violated")
+            }
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct List<'src> {
     head: Item<'src>,
     tail: Item<'src>,
@@ -158,152 +187,19 @@ pub enum Proc<'src> {
     },
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum Arith {
-    Add,
-    Sub,
-    Mul,
-    Div,
-}
-
-impl fmt::Display for Arith {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Arith::Add => idents::ADD,
-                Arith::Sub => idents::SUB,
-                Arith::Mul => idents::MUL,
-                Arith::Div => idents::DIV,
-            }
-        )
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum Cmp {
-    Eq,
-    Gt,
-    Ge,
-    Lt,
-    Le,
-}
-
-impl fmt::Display for Cmp {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Cmp::Eq => idents::EQ,
-                Cmp::Gt => idents::GT,
-                Cmp::Ge => idents::GE,
-                Cmp::Lt => idents::LT,
-                Cmp::Le => idents::LE,
-            }
-        )
-    }
-}
-
 impl<'src> Proc<'src> {
     fn apply(&self, args: HeadsIter<'_, 'src>) -> Result<Item<'src>> {
         match self {
-            Self::Arith(arith) => {
-                // guard against invalid args
-                ensure!(
-                    args.clone().all(|item| matches!(item, Item::Num(_))),
-                    "{self} cannot operate on non-number"
-                );
-                // guard against 0 args
-                if args.clone().next().is_none() {
-                    return match arith {
-                        Arith::Add => Ok(Item::Num(0.0)),
-                        Arith::Mul => Ok(Item::Num(1.0)),
-                        Arith::Sub | Arith::Div => {
-                            bail!("Wrong number of arguments for {self}")
-                        }
-                    };
-                }
-                // guard against div by zero
-                ensure!(
-                    !(matches!(arith, Arith::Div)
-                        && args.clone().any(|item| matches!(item, Item::Num(0.0)))),
-                    "Cannot divide by zero"
-                );
+            Self::Arith(arith) => arith.apply(args.try_into()?),
 
-                // guard against 1 arg
-                if args.clone().skip(1).next().is_none() {
-                    return match (arith, args.clone().next()) {
-                        (Arith::Add | Arith::Mul, Some(&Item::Num(num))) => Ok(Item::Num(num)),
-                        (Arith::Sub, Some(Item::Num(num))) => Ok(Item::Num(-num)),
-                        (Arith::Div, Some(Item::Num(num))) => Ok(Item::Num(1.0 / num)),
-                        _ => bail!("unreachable arithmetic"),
-                    };
-                }
-
-                args.flat_map(|item| {
-                    if let &Item::Num(n) = item {
-                        Some(n)
-                    } else {
-                        None
-                    }
-                })
-                .reduce(match arith {
-                    Arith::Add => <_ as Add>::add,
-                    Arith::Sub => <_ as Sub>::sub,
-                    Arith::Mul => <_ as Mul>::mul,
-                    Arith::Div => <_ as Div>::div,
-                })
-                .map(Item::Num)
-                .ok_or_else(|| anyhow::anyhow!("unreachable arithmetic"))
-            }
-
-            Self::Cmp(cmp) => {
-                // guard against invalid args
-                ensure!(
-                    args.clone().all(|item| matches!(item, Item::Num(_))),
-                    "{self} cannot operate on non-number"
-                );
-
-                let cmp = match cmp {
-                    Cmp::Eq => |lhs, rhs| lhs == rhs,
-                    Cmp::Gt => |lhs, rhs| lhs > rhs,
-                    Cmp::Ge => |lhs, rhs| lhs >= rhs,
-                    Cmp::Lt => |lhs, rhs| lhs < rhs,
-                    Cmp::Le => |lhs, rhs| lhs <= rhs,
-                };
-
-                let (token, _) = args
-                    .flat_map(|item| {
-                        if let &Item::Num(n) = item {
-                            Some(n)
-                        } else {
-                            None
-                        }
-                    })
-                    .fold((true, None), |(still_true, prev), num| {
-                        if still_true {
-                            prev.map_or((true, Some(num)), |prev| (cmp(prev, num), Some(num)))
-                        } else {
-                            (false, None)
-                        }
-                    });
-
-                Ok(Item::Token(if token { Token::True } else { Token::False }))
-            }
+            Self::Cmp(cmp) => cmp.apply(args.try_into()?),
 
             Self::Log => {
-                let mut args = args;
+                let mut args = NumsIter::try_from(args)?;
                 let Some(operand) = args.next() else {
                     bail!("Wrong number of arguments for {self}");
                 };
-                let Item::Num(operand) = operand else {
-                    bail!("{self} cannot operate on non-number");
-                };
-                let &Item::Num(base) = args.next().unwrap_or(&Item::Num(f64::consts::E)) else {
-                    bail!("{self} cannot operate on non-number");
-                };
+                let base = args.next().unwrap_or(f64::consts::E);
                 ensure!(
                     args.next().is_none(),
                     "Wrong number of arguments for {self}"
@@ -312,12 +208,9 @@ impl<'src> Proc<'src> {
             }
 
             Self::Exp => {
-                let mut args = args;
+                let mut args = NumsIter::try_from(args)?;
                 let Some(exp) = args.next() else {
                     bail!("Wrong number of arguments for {self}");
-                };
-                let Item::Num(exp) = exp else {
-                    bail!("{self} cannot operate on non-number");
                 };
                 ensure!(
                     args.next().is_none(),
@@ -380,8 +273,8 @@ impl<'src> Proc<'src> {
 impl fmt::Display for Proc<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Arith(arith) => write!(f, "<({arith})>"),
-            Self::Cmp(cmp) => write!(f, "<({cmp})>"),
+            Self::Arith(arith) => write!(f, "{arith}"),
+            Self::Cmp(cmp) => write!(f, "{cmp}"),
             Self::Log => write!(f, "<{}>", idents::LOG),
             Self::Exp => write!(f, "<{}>", idents::EXP),
             Self::User { name: None, .. } => write!(f, "<{}>", idents::LAMBDA),
@@ -389,5 +282,111 @@ impl fmt::Display for Proc<'_> {
                 name: Some(name), ..
             } => write!(f, "<proc '{name}'>"),
         }
+    }
+}
+
+#[derive(PartialEq, Copy, Clone, Debug)]
+pub enum Arith {
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+impl Arith {
+    fn apply<'src>(self, args: NumsIter<'_, 'src>) -> Result<Item<'src>> {
+        // guard against 0 args
+        if args.clone().next().is_none() {
+            return match self {
+                Self::Add => Ok(Item::Num(0.0)),
+                Self::Mul => Ok(Item::Num(1.0)),
+                Self::Sub | Self::Div => {
+                    bail!("Wrong number of arguments for {self}")
+                }
+            };
+        }
+        // guard against div by zero
+        ensure!(
+            !(self == Self::Div && args.clone().any(|item| item == 0.0)),
+            "Cannot divide by zero"
+        );
+        // guard against 1 arg
+        if args.clone().skip(1).next().is_none() {
+            return match (self, args.clone().next()) {
+                (Self::Add | Self::Mul, Some(num)) => Ok(Item::Num(num)),
+                (Self::Sub, Some(num)) => Ok(Item::Num(-num)),
+                (Self::Div, Some(num)) => Ok(Item::Num(1.0 / num)),
+                _ => bail!("unreachable arithmetic"),
+            };
+        }
+
+        args.reduce(match self {
+            Self::Add => <_ as Add>::add,
+            Self::Sub => <_ as Sub>::sub,
+            Self::Mul => <_ as Mul>::mul,
+            Self::Div => <_ as Div>::div,
+        })
+        .map(Item::Num)
+        .ok_or_else(|| anyhow!("unreachable arithmetic"))
+    }
+}
+
+impl fmt::Display for Arith {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "<({})>",
+            match self {
+                Self::Add => idents::ADD,
+                Self::Sub => idents::SUB,
+                Self::Mul => idents::MUL,
+                Self::Div => idents::DIV,
+            }
+        )
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum Cmp {
+    Eq,
+    Gt,
+    Ge,
+    Lt,
+    Le,
+}
+
+impl Cmp {
+    fn apply<'src>(self, args: NumsIter<'_, 'src>) -> Result<Item<'src>> {
+        let cmp = match self {
+            Self::Eq => |lhs, rhs| lhs == rhs,
+            Self::Gt => |lhs, rhs| lhs > rhs,
+            Self::Ge => |lhs, rhs| lhs >= rhs,
+            Self::Lt => |lhs, rhs| lhs < rhs,
+            Self::Le => |lhs, rhs| lhs <= rhs,
+        };
+        let (token, _) = args.fold((true, None), |(still_true, prev), num| {
+            if still_true {
+                prev.map_or((true, Some(num)), |prev| (cmp(prev, num), Some(num)))
+            } else {
+                (false, None)
+            }
+        });
+        Ok(Item::Token(if token { Token::True } else { Token::False }))
+    }
+}
+
+impl fmt::Display for Cmp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "<({})>",
+            match self {
+                Cmp::Eq => idents::EQ,
+                Cmp::Gt => idents::GT,
+                Cmp::Ge => idents::GE,
+                Cmp::Lt => idents::LT,
+                Cmp::Le => idents::LE,
+            }
+        )
     }
 }
