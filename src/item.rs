@@ -171,6 +171,6 @@ impl<'a, 'src> Iterator for NumsIter<'a, 'src> {
 
 #[derive(Clone, Debug)]
 pub struct List<'src> {
-    head: Item<'src>,
-    tail: Item<'src>,
+    pub head: Item<'src>,
+    pub tail: Item<'src>,
 }

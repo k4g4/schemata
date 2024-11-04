@@ -1,7 +1,7 @@
 use crate::{
     idents,
     item::{Item, Token},
-    proc::{Arith, Cmp, Proc, Trig},
+    proc::{Arith, Cmp, ListManip, Proc, Trig},
     scope::Scope,
 };
 use anyhow::{bail, ensure, Result};
@@ -61,6 +61,10 @@ impl<'src> Syn<'src> {
                     Ok(lookup)
                 } else {
                     let builtin = match ident {
+                        idents::CONS => Item::Proc(Proc::ListManip(ListManip::Cons)),
+                        idents::CAR => Item::Proc(Proc::ListManip(ListManip::Car)),
+                        idents::CDR => Item::Proc(Proc::ListManip(ListManip::Cdr)),
+
                         idents::TRUE => Item::Token(Token::True),
                         idents::FALSE => Item::Token(Token::False),
 

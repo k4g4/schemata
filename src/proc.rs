@@ -13,6 +13,7 @@ use std::{
 
 #[derive(Clone, Debug)]
 pub enum Proc<'src> {
+    ListManip(ListManip),
     Arith(Arith),
     Cmp(Cmp),
     Trig(Trig),
@@ -34,6 +35,8 @@ pub enum Proc<'src> {
 impl<'src> Proc<'src> {
     pub fn apply(&self, args: HeadsIter<'_, 'src>) -> Result<Item<'src>> {
         match self {
+            Self::ListManip(list_manip) => list_manip.apply(args),
+
             Self::Arith(arith) => arith.apply(args.try_into()?),
 
             Self::Cmp(cmp) => cmp.apply(args.try_into()?),
@@ -174,6 +177,7 @@ impl<'src> Proc<'src> {
 impl fmt::Display for Proc<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ListManip(list_manip) => write!(f, "{list_manip}"),
             Self::Arith(arith) => write!(f, "{arith}"),
             Self::Cmp(cmp) => write!(f, "{cmp}"),
             Self::Trig(trig) => write!(f, "{trig}"),
@@ -188,6 +192,71 @@ impl fmt::Display for Proc<'_> {
             Self::Compound {
                 name: Some(name), ..
             } => write!(f, "<proc '{name}'>"),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum ListManip {
+    Cons,
+    Car,
+    Cdr,
+}
+
+impl ListManip {
+    fn apply<'src>(self, mut args: HeadsIter<'_, 'src>) -> Result<Item<'src>> {
+        match self {
+            Self::Cons => {
+                let (head, tail) = args
+                    .next()
+                    .and_then(|head| args.next().map(|tail| (head, tail)))
+                    .with_context(|| anyhow!("Wrong number of arguments for {self}"))?;
+                ensure!(
+                    args.next().is_none(),
+                    "Wrong number of arguments for {self}"
+                );
+                Ok(Item::cons(head.clone(), tail.clone()))
+            }
+            Self::Car => {
+                ensure!(
+                    args.clone().count() == 1,
+                    "Wrong number of arguments for {self}"
+                );
+                let item = args.next();
+                if let Some(Item::List(Some(list))) = item {
+                    Ok(list.head.clone())
+                } else {
+                    bail!(
+                        "Cannot retrieve head from {}",
+                        item.expect("already checked")
+                    );
+                }
+            }
+            Self::Cdr => {
+                ensure!(
+                    args.clone().count() == 1,
+                    "Wrong number of arguments for {self}"
+                );
+                let item = args.next();
+                if let Some(Item::List(Some(list))) = item {
+                    Ok(list.tail.clone())
+                } else {
+                    bail!(
+                        "Cannot retrieve tail from {}",
+                        item.expect("already checked")
+                    );
+                }
+            }
+        }
+    }
+}
+
+impl fmt::Display for ListManip {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Cons => write!(f, "<{}>", idents::CONS),
+            Self::Car => write!(f, "<{}>", idents::CAR),
+            Self::Cdr => write!(f, "<{}>", idents::CDR),
         }
     }
 }
@@ -285,11 +354,11 @@ impl fmt::Display for Cmp {
             f,
             "<({})>",
             match self {
-                Cmp::Eq => idents::EQ,
-                Cmp::Gt => idents::GT,
-                Cmp::Ge => idents::GE,
-                Cmp::Lt => idents::LT,
-                Cmp::Le => idents::LE,
+                Self::Eq => idents::EQ,
+                Self::Gt => idents::GT,
+                Self::Ge => idents::GE,
+                Self::Lt => idents::LT,
+                Self::Le => idents::LE,
             }
         )
     }
