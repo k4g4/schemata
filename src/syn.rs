@@ -307,10 +307,13 @@ impl<'src> Syn<'src> {
 
 impl fmt::Display for Syn<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let pretty = f.alternate();
         let width = f.width().unwrap_or(0);
         let indent = |f: &mut fmt::Formatter| {
-            for _ in 0..width {
-                write!(f, "   ")?;
+            if pretty {
+                for _ in 0..width {
+                    write!(f, "   ")?;
+                }
             }
             Ok(())
         };
@@ -323,9 +326,16 @@ impl fmt::Display for Syn<'_> {
             Self::Reserved(reserved) => write!(f, "{reserved}"),
             Self::Group(items) if items.is_empty() => write!(f, "()"),
             Self::Group(items) => {
-                writeln!(f, "(")?;
+                write!(f, "(")?;
+                if pretty {
+                    writeln!(f)?;
+                }
                 for item in items {
-                    writeln!(f, "{item:width$}", width = width + 1)?;
+                    if pretty {
+                        writeln!(f, "{item:#width$}", width = width + 1)?;
+                    } else {
+                        write!(f, "{item} ")?;
+                    }
                 }
                 indent(f)?;
                 write!(f, ")")

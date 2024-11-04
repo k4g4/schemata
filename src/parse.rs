@@ -1,6 +1,6 @@
 use crate::{
     error::ParserError,
-    idents,
+    globals, idents,
     scope::Scope,
     syn::{Defs, Reserved, Syn},
 };
@@ -30,6 +30,7 @@ const DELIMS: &[u8] = b"();\"'`|[]{} \r\t\n";
 
 pub fn repl(prelude: &I, input: &I) -> Result<()> {
     let scope = Scope::new_global();
+    let pretty = globals::pretty();
 
     let prelude_syns = read(syns)(prelude)?;
     let input_syns = read(syns)(input)?;
@@ -40,13 +41,21 @@ pub fn repl(prelude: &I, input: &I) -> Result<()> {
 
     for syn in &input_syns {
         println!("Expression:");
-        println!("{syn}");
+        if pretty {
+            println!("{syn:#}");
+        } else {
+            println!("{syn}");
+        }
         println!();
 
         let item = syn.eval(&scope, Defs::Allowed)?;
 
         println!("Evaluated:");
-        println!("{item}");
+        if pretty {
+            println!("{item:#}");
+        } else {
+            println!("{item}");
+        }
         println!();
     }
 

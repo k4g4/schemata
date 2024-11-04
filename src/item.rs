@@ -76,10 +76,13 @@ impl<'src> Item<'src> {
 
 impl fmt::Display for Item<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let pretty = f.alternate();
         let width = f.width().unwrap_or(0);
         let indent = |f: &mut fmt::Formatter| {
-            for _ in 0..width {
-                write!(f, "   ")?;
+            if pretty {
+                for _ in 0..width {
+                    write!(f, "   ")?;
+                }
             }
             Ok(())
         };
@@ -93,20 +96,35 @@ impl fmt::Display for Item<'_> {
             Self::Defined => write!(f, "<{}>", idents::DEFINE),
             Self::List(list) => {
                 if let Some(List { head, tail }) = list.as_deref() {
-                    writeln!(f, "(")?;
+                    write!(f, "(")?;
+                    if pretty {
+                        writeln!(f)?;
+                    }
 
                     let (mut head, mut tail) = (head, tail);
                     loop {
-                        writeln!(f, "{head:width$}", width = width + 1)?;
+                        if pretty {
+                            writeln!(f, "{head:#width$}", width = width + 1)?;
+                        } else {
+                            write!(f, "{head} ")?;
+                        }
                         (head, tail) = match tail {
                             Self::List(Some(list)) => (&list.head, &list.tail),
 
                             Self::List(_) => break,
 
                             _ => {
-                                writeln!(f, ".")?;
+                                if pretty {
+                                    writeln!(f, ".")?;
+                                } else {
+                                    write!(f, " . ")?;
+                                }
                                 indent(f)?;
-                                writeln!(f, "{tail:width$}", width = width + 1)?;
+                                if pretty {
+                                    writeln!(f, "{tail:#width$}", width = width + 1)?;
+                                } else {
+                                    write!(f, "{tail} ")?;
+                                }
                                 break;
                             }
                         };

@@ -15,16 +15,24 @@ use std::{fs, path::PathBuf};
 #[derive(Parser)]
 struct Args {
     /// Path to the input file
-    #[arg(short)]
+    #[arg(long, short)]
     input: PathBuf,
     /// Enable debug printing
-    #[arg(long)]
+    #[arg(long, short)]
     debug: bool,
+    /// Enable pretty printing
+    #[arg(long, short)]
+    pretty: bool,
 }
 
 fn main() -> Result<()> {
-    let Args { input, debug } = Args::parse();
+    let Args {
+        input,
+        debug,
+        pretty,
+    } = Args::parse();
     globals::set_debug(debug);
+    globals::set_pretty(pretty);
 
     let prelude = include_bytes!("../prelude.scm");
 
