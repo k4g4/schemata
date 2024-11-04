@@ -1,6 +1,6 @@
 use crate::{
     globals, idents,
-    item::{ArgsIter, HeadsIter, Item, NumsIter, Token},
+    item::{ArgsIter, Item, ItemsIter, NumsIter, Token},
     scope::{Scope, ScopeHandle},
     syn::{Defs, Syn},
 };
@@ -35,7 +35,7 @@ pub enum Proc<'src> {
 }
 
 impl<'src> Proc<'src> {
-    pub fn apply(&self, args: HeadsIter<'_, 'src>) -> Result<Item<'src>> {
+    pub fn apply(&self, args: ItemsIter<'_, 'src>) -> Result<Item<'src>> {
         match self {
             Self::ListManip(list_manip) => list_manip.apply(args),
 
@@ -181,7 +181,7 @@ pub enum ListManip {
 }
 
 impl ListManip {
-    fn apply<'src>(self, args: HeadsIter<'_, 'src>) -> Result<Item<'src>> {
+    fn apply<'src>(self, args: ItemsIter<'_, 'src>) -> Result<Item<'src>> {
         match self {
             Self::Cons => {
                 let ([head, tail], []) = args.get(self)?;

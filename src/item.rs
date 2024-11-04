@@ -1,6 +1,6 @@
 use crate::{idents, proc::Proc};
 use anyhow::{bail, ensure, Error, Result};
-use std::{array, borrow::Cow, f64, fmt, rc::Rc};
+use std::{array, borrow::Cow, f64, fmt, iter::FusedIterator, rc::Rc};
 
 #[derive(Clone, Debug)]
 pub enum Item<'src> {
@@ -54,8 +54,8 @@ impl<'src> Item<'src> {
         !matches!(self, Self::Token(Token::False))
     }
 
-    fn iter(&self) -> HeadsIter<'_, 'src> {
-        HeadsIter(if let Self::List(list) = self {
+    fn iter(&self) -> ItemsIter<'_, 'src> {
+        ItemsIter(if let Self::List(list) = self {
             list.as_deref()
         } else {
             None
@@ -147,9 +147,9 @@ impl fmt::Display for Item<'_> {
 }
 
 #[derive(Clone, Debug)]
-pub struct HeadsIter<'a, 'src>(Option<&'a List<'src>>);
+pub struct ItemsIter<'a, 'src>(Option<&'a List<'src>>);
 
-impl<'a, 'src> Iterator for HeadsIter<'a, 'src> {
+impl<'a, 'src> Iterator for ItemsIter<'a, 'src> {
     type Item = &'a Item<'src>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -164,13 +164,15 @@ impl<'a, 'src> Iterator for HeadsIter<'a, 'src> {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct NumsIter<'a, 'src>(HeadsIter<'a, 'src>);
+impl FusedIterator for ItemsIter<'_, '_> {}
 
-impl<'a, 'src> TryFrom<HeadsIter<'a, 'src>> for NumsIter<'a, 'src> {
+#[derive(Clone, Debug)]
+pub struct NumsIter<'a, 'src>(ItemsIter<'a, 'src>);
+
+impl<'a, 'src> TryFrom<ItemsIter<'a, 'src>> for NumsIter<'a, 'src> {
     type Error = Error;
 
-    fn try_from(heads_iter: HeadsIter<'a, 'src>) -> Result<Self> {
+    fn try_from(heads_iter: ItemsIter<'a, 'src>) -> Result<Self> {
         ensure!(
             heads_iter.clone().all(|item| matches!(item, Item::Num(_))),
             "cannot operate on non-number"
@@ -193,17 +195,9 @@ impl<'a, 'src> Iterator for NumsIter<'a, 'src> {
     }
 }
 
-pub trait ArgsIter<'src>: Iterator {
-    fn get<const REQUIRED: usize, const OPTIONAL: usize>(
-        &self,
-        this: impl fmt::Display,
-    ) -> Result<(
-        [<Self as Iterator>::Item; REQUIRED],
-        [Option<<Self as Iterator>::Item>; OPTIONAL],
-    )>;
-}
+impl FusedIterator for NumsIter<'_, '_> {}
 
-impl<'src, T: Iterator + Clone> ArgsIter<'src> for T {
+pub trait ArgsIter<'src>: FusedIterator + Clone + Sized {
     fn get<const REQUIRED: usize, const OPTIONAL: usize>(
         &self,
         this: impl fmt::Display,
@@ -226,3 +220,5 @@ impl<'src, T: Iterator + Clone> ArgsIter<'src> for T {
         Ok((required, optional))
     }
 }
+
+impl<'src, T: FusedIterator + Clone> ArgsIter<'src> for T {}
