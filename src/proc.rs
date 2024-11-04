@@ -1,10 +1,10 @@
 use crate::{
     globals, idents,
-    item::{HeadsIter, Item, NumsIter, Token},
+    item::{ArgsIter, HeadsIter, Item, NumsIter, Token},
     scope::{Scope, ScopeHandle},
     syn::{Defs, Syn},
 };
-use anyhow::{anyhow, bail, ensure, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use std::{
     f64, fmt,
     ops::{Add, Div, Mul, Sub},
@@ -23,6 +23,8 @@ pub enum Proc<'src> {
     Trunc,
     Floor,
     Ceil,
+    Display,
+    Newline,
     Error,
     Compound {
         name: Option<&'src str>,
@@ -44,81 +46,54 @@ impl<'src> Proc<'src> {
             Self::Trig(trig) => trig.apply(args.try_into()?),
 
             Self::Log => {
-                let mut args = NumsIter::try_from(args)?;
-                let Some(operand) = args.next() else {
-                    bail!("Wrong number of arguments for {self}");
-                };
-                let base = args.next().unwrap_or(f64::consts::E);
-                ensure!(
-                    args.next().is_none(),
-                    "Wrong number of arguments for {self}"
-                );
+                let ([operand], [base]) = NumsIter::try_from(args)?.get(self)?;
+                let base = base.unwrap_or(f64::consts::E);
                 Ok(Item::Num(operand.log(base)))
             }
 
             Self::Exp => {
-                let mut args = NumsIter::try_from(args)?;
-                let Some(exp) = args.next() else {
-                    bail!("Wrong number of arguments for {self}");
-                };
-                ensure!(
-                    args.next().is_none(),
-                    "Wrong number of arguments for {self}"
-                );
+                let ([exp], []) = NumsIter::try_from(args)?.get(self)?;
                 Ok(Item::Num(exp.exp()))
             }
 
             Self::Rem => {
-                let mut args = NumsIter::try_from(args)?;
-                let Some((first, second)) =
-                    args.next().and_then(|first| Some((first, args.next()?)))
-                else {
-                    bail!("Wrong number of arguments for {self}");
-                };
-                Ok(Item::Num(first % second))
+                let ([dividend, divisor], []) = NumsIter::try_from(args)?.get(self)?;
+                Ok(Item::Num(dividend % divisor))
             }
 
             Self::Trunc => {
-                let mut args = NumsIter::try_from(args)?;
-                let Some(exp) = args.next() else {
-                    bail!("Wrong number of arguments for {self}");
-                };
-                ensure!(
-                    args.next().is_none(),
-                    "Wrong number of arguments for {self}"
-                );
-                Ok(Item::Num(exp.trunc()))
+                let ([num], []) = NumsIter::try_from(args)?.get(self)?;
+                Ok(Item::Num(num.trunc()))
             }
 
             Self::Floor => {
-                let mut args = NumsIter::try_from(args)?;
-                let Some(exp) = args.next() else {
-                    bail!("Wrong number of arguments for {self}");
-                };
-                ensure!(
-                    args.next().is_none(),
-                    "Wrong number of arguments for {self}"
-                );
-                Ok(Item::Num(exp.floor()))
+                let ([num], []) = NumsIter::try_from(args)?.get(self)?;
+                Ok(Item::Num(num.floor()))
             }
 
             Self::Ceil => {
-                let mut args = NumsIter::try_from(args)?;
-                let Some(exp) = args.next() else {
-                    bail!("Wrong number of arguments for {self}");
-                };
-                ensure!(
-                    args.next().is_none(),
-                    "Wrong number of arguments for {self}"
-                );
-                Ok(Item::Num(exp.ceil()))
+                let ([num], []) = NumsIter::try_from(args)?.get(self)?;
+                Ok(Item::Num(num.ceil()))
+            }
+
+            Self::Display => {
+                let ([item], []) = args.get(self)?;
+                if let Item::String(string) = item {
+                    print!("{string}");
+                } else {
+                    print!("{item}");
+                }
+                Ok(Item::nil())
+            }
+
+            Self::Newline => {
+                let ([], []) = args.get(self)?;
+                println!();
+                Ok(Item::nil())
             }
 
             Self::Error => {
-                ensure!(
-                    args.clone().count() > 0,
-                    "Wrong number of arguments for {self}"
-                );
+                ensure!(args.clone().count() > 0, "No arguments provided for {self}");
                 bail!(args.map(|arg| format!("{arg} ")).collect::<String>())
             }
 
@@ -187,6 +162,8 @@ impl fmt::Display for Proc<'_> {
             Self::Trunc => write!(f, "<{}>", idents::TRUNC),
             Self::Floor => write!(f, "<{}>", idents::FLOOR),
             Self::Ceil => write!(f, "<{}>", idents::CEIL),
+            Self::Display => write!(f, "<{}>", idents::DISP),
+            Self::Newline => write!(f, "<{}>", idents::NEWL),
             Self::Error => write!(f, "<{}>", idents::ERROR),
             Self::Compound { name: None, .. } => write!(f, "<{}>", idents::LAMBDA),
             Self::Compound {
@@ -204,47 +181,28 @@ pub enum ListManip {
 }
 
 impl ListManip {
-    fn apply<'src>(self, mut args: HeadsIter<'_, 'src>) -> Result<Item<'src>> {
+    fn apply<'src>(self, args: HeadsIter<'_, 'src>) -> Result<Item<'src>> {
         match self {
             Self::Cons => {
-                let (head, tail) = args
-                    .next()
-                    .and_then(|head| args.next().map(|tail| (head, tail)))
-                    .with_context(|| anyhow!("Wrong number of arguments for {self}"))?;
-                ensure!(
-                    args.next().is_none(),
-                    "Wrong number of arguments for {self}"
-                );
+                let ([head, tail], []) = args.get(self)?;
                 Ok(Item::cons(head.clone(), tail.clone()))
             }
+
             Self::Car => {
-                ensure!(
-                    args.clone().count() == 1,
-                    "Wrong number of arguments for {self}"
-                );
-                let item = args.next();
-                if let Some(Item::List(Some(list))) = item {
+                let ([item], []) = args.get(self)?;
+                if let Item::List(Some(list)) = item {
                     Ok(list.head.clone())
                 } else {
-                    bail!(
-                        "Cannot retrieve head from {}",
-                        item.expect("already checked")
-                    );
+                    bail!("Cannot retrieve head from '{}'", item);
                 }
             }
+
             Self::Cdr => {
-                ensure!(
-                    args.clone().count() == 1,
-                    "Wrong number of arguments for {self}"
-                );
-                let item = args.next();
-                if let Some(Item::List(Some(list))) = item {
+                let ([item], []) = args.get(self)?;
+                if let Item::List(Some(list)) = item {
                     Ok(list.tail.clone())
                 } else {
-                    bail!(
-                        "Cannot retrieve tail from {}",
-                        item.expect("already checked")
-                    );
+                    bail!("Cannot retrieve tail from '{}'", item);
                 }
             }
         }
@@ -272,11 +230,15 @@ pub enum Arith {
 impl Arith {
     fn apply<'src>(self, args: NumsIter<'_, 'src>) -> Result<Item<'src>> {
         if args.clone().count() == 0 {
-            return match self {
-                Self::Add => Ok(Item::Num(0.0)),
-                Self::Mul => Ok(Item::Num(1.0)),
+            match self {
+                Self::Add => {
+                    return Ok(Item::Num(0.0));
+                }
+                Self::Mul => {
+                    return Ok(Item::Num(1.0));
+                }
                 Self::Sub | Self::Div => {
-                    bail!("Wrong number of arguments for {self}")
+                    bail!("No arguments provided for {self}");
                 }
             };
         }
@@ -300,7 +262,7 @@ impl Arith {
             Self::Div => <_ as Div>::div,
         })
         .map(Item::Num)
-        .ok_or_else(|| anyhow!("unreachable arithmetic"))
+        .context("unreachable arithmetic")
     }
 }
 
@@ -381,12 +343,9 @@ pub enum Trig {
 }
 
 impl Trig {
-    fn apply<'src>(self, mut args: NumsIter<'_, 'src>) -> Result<Item<'src>> {
-        ensure!(
-            args.clone().count() == 1,
-            "Wrong number of arguments for {self}"
-        );
-        let func = match self {
+    fn apply<'src>(self, args: NumsIter<'_, 'src>) -> Result<Item<'src>> {
+        let ([num], []) = args.get(self)?;
+        Ok(Item::Num(match self {
             Self::Sin => f64::sin,
             Self::Cos => f64::cos,
             Self::Tan => f64::tan,
@@ -399,8 +358,7 @@ impl Trig {
             Self::Asinh => f64::asinh,
             Self::Acosh => f64::acosh,
             Self::Atanh => f64::atanh,
-        };
-        Ok(Item::Num(func(args.next().expect("already checked"))))
+        }(num)))
     }
 }
 

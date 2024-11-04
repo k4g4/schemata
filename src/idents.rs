@@ -17,6 +17,10 @@ idents! {
     AND:    "and",
     OR:     "or",
 
+    DISP:   "display",
+    NEWL:   "newline",
+    ERROR:  "error",
+
     ADD:    "+",
     SUB:    "-",
     MUL:    "*",
@@ -41,7 +45,6 @@ idents! {
     ASINH:  "asinh",
     ACOSH:  "acosh",
     ATANH:  "atanh",
-    ERROR:  "error",
 
     TRUE:   "#t",
     FALSE:  "#f",

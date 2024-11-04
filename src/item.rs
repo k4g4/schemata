@@ -1,6 +1,6 @@
 use crate::{idents, proc::Proc};
 use anyhow::{bail, ensure, Error, Result};
-use std::{borrow::Cow, f64, fmt, rc::Rc};
+use std::{array, borrow::Cow, f64, fmt, rc::Rc};
 
 #[derive(Clone, Debug)]
 pub enum Item<'src> {
@@ -10,6 +10,12 @@ pub enum Item<'src> {
     Proc(Proc<'src>),
     Token(Token),
     Defined,
+}
+
+#[derive(Clone, Debug)]
+pub struct List<'src> {
+    pub head: Item<'src>,
+    pub tail: Item<'src>,
 }
 
 #[derive(PartialEq, Copy, Clone, Debug)]
@@ -187,8 +193,36 @@ impl<'a, 'src> Iterator for NumsIter<'a, 'src> {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct List<'src> {
-    pub head: Item<'src>,
-    pub tail: Item<'src>,
+pub trait ArgsIter<'src>: Iterator {
+    fn get<const REQUIRED: usize, const OPTIONAL: usize>(
+        &self,
+        this: impl fmt::Display,
+    ) -> Result<(
+        [<Self as Iterator>::Item; REQUIRED],
+        [Option<<Self as Iterator>::Item>; OPTIONAL],
+    )>;
+}
+
+impl<'src, T: Iterator + Clone> ArgsIter<'src> for T {
+    fn get<const REQUIRED: usize, const OPTIONAL: usize>(
+        &self,
+        this: impl fmt::Display,
+    ) -> Result<(
+        [<Self as Iterator>::Item; REQUIRED],
+        [Option<<Self as Iterator>::Item>; OPTIONAL],
+    )> {
+        ensure!(
+            (REQUIRED..=REQUIRED + OPTIONAL).contains(&self.clone().count()),
+            "Not enough arguments for {this} (Expected {REQUIRED})"
+        );
+        let mut iter = self.clone();
+        let required = array::from_fn(|_| iter.next().expect("already checked"));
+        let optional = array::from_fn(|_| iter.next());
+        ensure!(
+            iter.next().is_none(),
+            "Too many arguments for {this} (Expected at most {})",
+            REQUIRED + OPTIONAL
+        );
+        Ok((required, optional))
+    }
 }

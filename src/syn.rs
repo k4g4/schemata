@@ -99,6 +99,8 @@ impl<'src> Syn<'src> {
                         idents::ACOSH => Item::Proc(Proc::Trig(Trig::Acosh)),
                         idents::ATANH => Item::Proc(Proc::Trig(Trig::Atanh)),
 
+                        idents::DISP => Item::Proc(Proc::Display),
+                        idents::NEWL => Item::Proc(Proc::Newline),
                         idents::ERROR => Item::Proc(Proc::Error),
 
                         _ => {

@@ -38,3 +38,5 @@
 
 (define (identity x) x)
 
+(define (newline) (display "\n"))
+
