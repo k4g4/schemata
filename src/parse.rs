@@ -4,29 +4,22 @@ use crate::{
     scope::Scope,
     syn::{Defs, Reserved, Syn},
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use core::str;
 use nom::{
-    branch::{alt, Alt},
-    bytes::{
-        complete::{tag, take_till1, take_until},
-        streaming,
-    },
-    character::complete::{char, multispace0, one_of},
-    combinator::{all_consuming, cut, map, map_res, not, peek, value},
+    branch::alt,
+    bytes::complete::{tag, take_till1, take_until},
+    character::complete::{char, multispace0, not_line_ending, one_of},
+    combinator::{all_consuming, map, map_res, not, value},
     error::context,
     multi::{many0, many0_count},
     number::complete::double,
-    sequence::{delimited, pair, preceded, terminated},
-    Parser,
+    sequence::{delimited, pair, preceded},
 };
 use std::borrow::Cow;
 
 type I = [u8];
-
-type ParseRes<'src, O> = nom::IResult<&'src I, O, ParserError>;
-
-const DELIMS: &[u8] = b"();\"'`|[]{} \r\t\n";
+type ParseRes<'i, O> = nom::IResult<&'i I, O, ParserError<&'i I>>;
 
 pub fn repl(prelude: &I, input: &I) -> Result<()> {
     let scope = Scope::new_global();
@@ -52,9 +45,9 @@ pub fn repl(prelude: &I, input: &I) -> Result<()> {
 
         println!("Evaluated:");
         if pretty {
-            println!("{item:#}");
+            println!("{item:+#}");
         } else {
-            println!("{item}");
+            println!("{item:+}");
         }
         println!();
     }
@@ -62,66 +55,42 @@ pub fn repl(prelude: &I, input: &I) -> Result<()> {
     Ok(())
 }
 
-fn read<'a, O>(mut parser: impl Parser<&'a I, O, ParserError>) -> impl FnMut(&'a I) -> Result<O> {
-    move |input| match parser.parse(input) {
+fn read<'i, O>(parser: impl FnMut(&'i I) -> ParseRes<O>) -> impl FnOnce(&'i I) -> Result<O> {
+    move |i| match all_consuming(parser)(i) {
         Ok((_, out)) => Ok(out),
-        Err(nom::Err::Error(error) | nom::Err::Failure(error)) => Err(error.into()),
-        Err(nom::Err::Incomplete(_)) => Err(ParserError::Unexpected.into()),
+        Err(nom::Err::Error(error) | nom::Err::Failure(error)) => Err(anyhow!("{error}")),
+        Err(nom::Err::Incomplete(_)) => Err(anyhow!("Incomplete input")),
     }
 }
 
-fn allow_incomplete<'a, O>(
-    mut parser: impl Parser<&'a I, O, ParserError>,
-) -> impl FnMut(&'a I) -> ParseRes<Option<O>> {
-    move |input| {
-        parser
-            .parse(input)
-            .map(|(input, output)| (input, Some(output)))
-            .or_else(|err| {
-                if err.is_incomplete() {
-                    Ok((&[], None))
-                } else {
-                    Err(err)
-                }
-            })
-    }
+fn comment(i: &I) -> ParseRes<&I> {
+    preceded(tag(";;"), not_line_ending)(i)
 }
 
-fn syns(input: &I) -> ParseRes<Vec<Syn>> {
-    all_consuming(many0(syn))(input)
-}
-
-fn comment(input: &I) -> ParseRes<()> {
+fn ignore(i: &I) -> ParseRes<()> {
     value(
         (),
-        allow_incomplete(tag(";;").and(streaming::take_until("\n")).and(tag("\n"))),
-    )(input)
+        preceded(multispace0, many0_count(pair(comment, multispace0))),
+    )(i)
 }
 
-fn ignore(input: &I) -> ParseRes<()> {
-    value((), multispace0.and(many0_count(comment.and(multispace0))))(input)
+fn syns(i: &I) -> ParseRes<Vec<Syn>> {
+    many0(delimited(ignore, syn, ignore))(i)
 }
 
-fn syn(input: &I) -> ParseRes<Syn> {
-    let syn_parsers = (
-        reserved.map(Syn::Reserved),
-        double.map(Syn::Num),
-        token.map(Syn::Ident),
-        context("identifier", ident).map(Syn::Ident),
-        context("string", string).map(Syn::String),
-        context("list", list).map(Syn::Group),
-    );
-    delimited(ignore, alt(syn_parsers), ignore)(input)
+fn syn(i: &I) -> ParseRes<Syn> {
+    alt((
+        context("reserved", map(reserved, Syn::Reserved)),
+        context("number", map(double, Syn::Num)),
+        context("token", map(token, Syn::Ident)),
+        context("identifier", map(ident, Syn::Ident)),
+        context("string", map(string, Syn::String)),
+        context("s-expression", map(s_expr, Syn::SExpr)),
+    ))(i)
 }
 
-fn any_delim<'i, O>(
-    mut list: impl Alt<&'i I, O, ParserError>,
-) -> impl FnMut(&'i I) -> ParseRes<'i, O> {
-    move |input| terminated(|i| list.choice(i), peek(one_of(DELIMS)))(input)
-}
-
-fn reserved(input: &I) -> ParseRes<Reserved> {
-    any_delim((
+fn reserved(i: &I) -> ParseRes<Reserved> {
+    alt((
         value(Reserved::Define, tag(idents::DEFINE)),
         value(Reserved::Lambda, tag(idents::LAMBDA)),
         value(Reserved::Let, tag(idents::LET)),
@@ -130,37 +99,34 @@ fn reserved(input: &I) -> ParseRes<Reserved> {
         value(Reserved::If, tag(idents::IF)),
         value(Reserved::And, tag(idents::AND)),
         value(Reserved::Or, tag(idents::OR)),
-    ))(input)
+    ))(i)
 }
 
-fn token(input: &I) -> ParseRes<&str> {
+fn token(i: &I) -> ParseRes<&str> {
     map_res(
-        any_delim((tag(idents::TRUE), tag(idents::FALSE))),
+        alt((tag(idents::TRUE), tag(idents::FALSE), tag(idents::VOID))),
         str::from_utf8,
-    )(input)
+    )(i)
 }
 
-fn ident(input: &I) -> ParseRes<&str> {
+fn ident(i: &I) -> ParseRes<&str> {
+    let delim = "();\"'`|[]{} \r\t\n";
     map_res(
         preceded(
-            not(one_of::<_, _, ParserError>("#,").or(one_of(DELIMS))),
-            take_till1(|c| DELIMS.contains(&c)),
+            not(alt((one_of("#,"), one_of(delim)))),
+            take_till1(|b| delim.as_bytes().contains(&b)),
         ),
         str::from_utf8,
-    )(input)
+    )(i)
 }
 
-fn string(input: &I) -> ParseRes<Cow<'_, str>> {
+fn string(i: &I) -> ParseRes<Cow<'_, str>> {
     map(
-        delimited(char::<_, ParserError>('"'), take_until("\""), char('"')),
+        delimited(char('"'), take_until("\""), char('"')),
         String::from_utf8_lossy,
-    )(input)
+    )(i)
 }
 
-fn list(input: &I) -> ParseRes<Vec<Syn>> {
-    delimited(
-        pair(char('('), ignore),
-        many0(syn),
-        cut(pair(ignore, char(')'))),
-    )(input)
+fn s_expr(i: &I) -> ParseRes<Vec<Syn>> {
+    delimited(char('('), syns, char(')'))(i)
 }

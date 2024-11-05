@@ -48,6 +48,7 @@ idents! {
 
     TRUE:   "#t",
     FALSE:  "#f",
+    VOID:   "#!void",
 
     EQ:     "=",
     GT:     ">",

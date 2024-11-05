@@ -242,10 +242,17 @@ impl Arith {
                 }
             };
         }
-        ensure!(
-            !(self == Self::Div && args.clone().any(|item| item == 0.0)),
-            "Cannot divide by zero"
-        );
+        // deny certain cases where arg is 0
+        if self == Self::Div {
+            if args.clone().count() == 1 {
+                ensure!(args.clone().next().unwrap() != 0.0, "Cannot divide by zero");
+            } else {
+                ensure!(
+                    args.clone().skip(1).all(|num| num != 0.0),
+                    "Cannot divide by zero"
+                );
+            }
+        }
         if args.clone().count() == 1 {
             return match (self, args.clone().next()) {
                 (Self::Add | Self::Mul, Some(num)) => Ok(Item::Num(num)),

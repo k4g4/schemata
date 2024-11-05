@@ -13,7 +13,7 @@ pub enum Syn<'src> {
     String(Cow<'src, str>),
     Ident(&'src str),
     Reserved(Reserved),
-    Group(Vec<Syn<'src>>),
+    SExpr(Vec<Syn<'src>>),
 }
 
 #[derive(PartialEq, Copy, Clone, Debug)]
@@ -67,6 +67,7 @@ impl<'src> Syn<'src> {
 
                         idents::TRUE => Item::Token(Token::True),
                         idents::FALSE => Item::Token(Token::False),
+                        idents::VOID => Item::Token(Token::Void),
 
                         idents::ADD => Item::Proc(Proc::Arith(Arith::Add)),
                         idents::SUB => Item::Proc(Proc::Arith(Arith::Sub)),
@@ -114,7 +115,7 @@ impl<'src> Syn<'src> {
 
             Self::Reserved(reserved) => bail!("Unexpected '{reserved}'"),
 
-            Self::Group(group) => match group.as_slice() {
+            Self::SExpr(group) => match group.as_slice() {
                 [] => Ok(Item::nil()),
 
                 [Self::Reserved(Reserved::Define), ..] if defs == Defs::NotAllowed => {
@@ -126,7 +127,7 @@ impl<'src> Syn<'src> {
                     Ok(Item::Defined)
                 }
 
-                [Self::Reserved(Reserved::Define), Self::Group(signature), body @ ..] => {
+                [Self::Reserved(Reserved::Define), Self::SExpr(signature), body @ ..] => {
                     ensure!(!body.is_empty(), "Empty '{}' body", idents::DEFINE);
                     match signature.as_slice() {
                         [Self::Ident(ident), params @ ..] => {
@@ -158,7 +159,7 @@ impl<'src> Syn<'src> {
                     bail!("Malformed '{}'", idents::DEFINE)
                 }
 
-                [Self::Reserved(Reserved::Lambda), Self::Group(params), body @ ..] => {
+                [Self::Reserved(Reserved::Lambda), Self::SExpr(params), body @ ..] => {
                     ensure!(!body.is_empty(), "Empty '{}' body", idents::LAMBDA);
                     let params = params
                         .iter()
@@ -182,12 +183,12 @@ impl<'src> Syn<'src> {
                     bail!("Malformed '{}'", idents::LAMBDA)
                 }
 
-                [Self::Reserved(Reserved::Let), Self::Group(mappings), body @ ..] => {
+                [Self::Reserved(Reserved::Let), Self::SExpr(mappings), body @ ..] => {
                     ensure!(!body.is_empty(), "Empty '{}' body", idents::LET);
                     let params = mappings
                         .iter()
                         .map(|mapping| {
-                            if let Syn::Group(group) = mapping {
+                            if let Syn::SExpr(group) = mapping {
                                 if let &[Self::Ident(param), _] = group.as_slice() {
                                     Ok(param)
                                 } else {
@@ -199,7 +200,7 @@ impl<'src> Syn<'src> {
                         })
                         .collect::<Result<_>>()?;
                     let defs = mappings.iter().map(|mapping| {
-                        if let Syn::Group(group) = mapping {
+                        if let Syn::SExpr(group) = mapping {
                             &group[1]
                         } else {
                             unreachable!("already checked")
@@ -227,7 +228,7 @@ impl<'src> Syn<'src> {
 
                 [Self::Reserved(Reserved::Cond), conds @ ..] if !conds.is_empty() => {
                     for (i, cond) in conds.iter().enumerate() {
-                        if let Self::Group(group) = cond {
+                        if let Self::SExpr(group) = cond {
                             match group.as_slice() {
                                 [] => bail!("Malformed '{}'", idents::COND),
 
@@ -271,9 +272,9 @@ impl<'src> Syn<'src> {
                     ensure!(matches!(syns.len(), 2 | 3), "Malformed '{}'", idents::IF);
                     let cond = syns[0].eval(scope, Defs::NotAllowed)?.apply()?;
                     if cond.is_truthy() {
-                        syns[1].eval(scope, Defs::NotAllowed)?.apply()
+                        syns[1].eval(scope, Defs::NotAllowed)
                     } else if let Some(alt) = syns.get(2) {
-                        alt.eval(scope, Defs::NotAllowed)?.apply()
+                        alt.eval(scope, Defs::NotAllowed)
                     } else {
                         bail!(
                             "No alternative value for '{}' with {} predicate",
@@ -326,8 +327,8 @@ impl fmt::Display for Syn<'_> {
             Self::String(string) => write!(f, "\"{string}\""),
             Self::Ident(ident) => write!(f, "{ident}"),
             Self::Reserved(reserved) => write!(f, "{reserved}"),
-            Self::Group(items) if items.is_empty() => write!(f, "()"),
-            Self::Group(items) => {
+            Self::SExpr(items) if items.is_empty() => write!(f, "()"),
+            Self::SExpr(items) => {
                 write!(f, "(")?;
                 if pretty {
                     writeln!(f)?;
