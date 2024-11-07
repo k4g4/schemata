@@ -65,9 +65,9 @@ impl<'src> Syn<'src> {
                         idents::CAR => Item::Proc(Proc::ListManip(ListManip::Car)),
                         idents::CDR => Item::Proc(Proc::ListManip(ListManip::Cdr)),
 
-                        idents::TRUE => Item::Token(Token::True),
-                        idents::FALSE => Item::Token(Token::False),
-                        idents::VOID => Item::Token(Token::Void),
+                        idents::TRUE => Item::bool(true),
+                        idents::FALSE => Item::bool(false),
+                        idents::VOID => Item::void(),
 
                         idents::ADD => Item::Proc(Proc::Arith(Arith::Add)),
                         idents::SUB => Item::Proc(Proc::Arith(Arith::Sub)),
@@ -286,7 +286,7 @@ impl<'src> Syn<'src> {
 
                 [Self::Reserved(reserved @ (Reserved::And | Reserved::Or)), syns @ ..] => {
                     let is_and = *reserved == Reserved::And;
-                    let initial = Item::Token(if is_and { Token::False } else { Token::True });
+                    let initial = Item::bool(!is_and);
 
                     syns.iter()
                         .try_fold((false, initial), |(done, prev), syn| {

@@ -44,6 +44,14 @@ impl<'src> Item<'src> {
         Self::List(Some(Rc::new(List { head, tail })))
     }
 
+    pub fn bool(bool: bool) -> Self {
+        Self::Token(if bool { Token::True } else { Token::False })
+    }
+
+    pub fn void() -> Self {
+        Self::Token(Token::Void)
+    }
+
     pub fn from_items(
         items: impl IntoIterator<IntoIter = impl DoubleEndedIterator<Item = Result<Self>>>,
     ) -> Result<Self> {

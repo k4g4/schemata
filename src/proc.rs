@@ -1,6 +1,6 @@
 use crate::{
     globals, idents,
-    item::{ArgsIter, Item, ItemsIter, NumsIter, Token},
+    item::{ArgsIter, Item, ItemsIter, NumsIter},
     scope::{Scope, ScopeHandle},
     syn::{Defs, Syn},
 };
@@ -83,13 +83,13 @@ impl<'src> Proc<'src> {
                 } else {
                     print!("{item}");
                 }
-                Ok(Item::nil())
+                Ok(Item::void())
             }
 
             Self::Newline => {
                 let ([], []) = args.get(self)?;
                 println!();
-                Ok(Item::nil())
+                Ok(Item::void())
             }
 
             Self::Error => {
@@ -306,14 +306,14 @@ impl Cmp {
             Self::Lt => |lhs, rhs| lhs < rhs,
             Self::Le => |lhs, rhs| lhs <= rhs,
         };
-        let (token, _) = args.fold((true, None), |(still_true, prev), num| {
+        let (bool, _) = args.fold((true, None), |(still_true, prev), num| {
             if still_true {
                 prev.map_or((true, Some(num)), |prev| (cmp(prev, num), Some(num)))
             } else {
                 (false, None)
             }
         });
-        Ok(Item::Token(if token { Token::True } else { Token::False }))
+        Ok(Item::bool(bool))
     }
 }
 

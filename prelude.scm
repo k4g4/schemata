@@ -3,6 +3,12 @@
         (expr #f)
         (else #t)))
 
+(define (xor a b)
+    (cond
+        ((and a b) #f)
+        ((not (or a b)) #f)
+        (else #t)))
+
 ;;(define (>= x y)
 ;;    (not (< x y)))
 ;;(define (<= x y)
