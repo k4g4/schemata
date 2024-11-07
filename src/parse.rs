@@ -1,29 +1,29 @@
 use crate::{
     error::ParserError,
     globals, idents,
+    item::{Item, Token},
     scope::Scope,
     syn::{Defs, Reserved, Syn},
 };
 use anyhow::{anyhow, Result};
-use core::str;
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take_till1, take_until},
-    character::complete::{char, multispace0, not_line_ending, one_of},
-    combinator::{all_consuming, map, map_res, not, value},
+    bytes::complete::{tag, take_till1},
+    character::complete::{char, multispace0, none_of, not_line_ending, one_of},
+    combinator::{all_consuming, map, map_res, not, recognize, value, verify},
     error::context,
     multi::{many0, many0_count},
     number::complete::double,
-    sequence::{delimited, pair, preceded},
+    sequence::{delimited, pair, preceded, terminated},
 };
-use std::borrow::Cow;
+use std::{borrow::Cow, str};
 
 type I = [u8];
 type ParseRes<'i, O> = nom::IResult<&'i I, O, ParserError<&'i I>>;
 
 pub fn repl(prelude: &I, input: &I) -> Result<()> {
+    let (debug, pretty) = (globals::debug(), globals::pretty());
     let scope = Scope::new_global();
-    let pretty = globals::pretty();
 
     let prelude_syns = read(syns)(prelude)?;
     let input_syns = read(syns)(input)?;
@@ -33,23 +33,27 @@ pub fn repl(prelude: &I, input: &I) -> Result<()> {
     }
 
     for syn in &input_syns {
-        println!("Expression:");
-        if pretty {
-            println!("{syn:#}");
-        } else {
-            println!("{syn}");
+        if debug {
+            println!("Expression:");
+            if pretty {
+                println!("{syn:#}");
+            } else {
+                println!("{syn}");
+            }
         }
-        println!();
 
         let item = syn.eval(&scope, Defs::Allowed)?;
 
-        println!("Evaluated:");
-        if pretty {
-            println!("{item:+#}");
-        } else {
-            println!("{item:+}");
+        if debug {
+            println!("Evaluated:");
         }
-        println!();
+        if !matches!(item, Item::Token(Token::Void) | Item::Defined) {
+            if pretty {
+                println!("{item:#}");
+            } else {
+                println!("{item}");
+            }
+        }
     }
 
     Ok(())
@@ -70,27 +74,28 @@ fn comment(i: &I) -> ParseRes<&I> {
 fn ignore(i: &I) -> ParseRes<()> {
     value(
         (),
-        preceded(multispace0, many0_count(pair(comment, multispace0))),
+        pair(multispace0, many0_count(pair(comment, multispace0))),
     )(i)
 }
 
 fn syns(i: &I) -> ParseRes<Vec<Syn>> {
-    many0(delimited(ignore, syn, ignore))(i)
+    preceded(ignore, many0(terminated(syn, ignore)))(i)
 }
 
 fn syn(i: &I) -> ParseRes<Syn> {
-    alt((
+    let syns = (
         context("reserved", map(reserved, Syn::Reserved)),
-        context("number", map(double, Syn::Num)),
+        context("number", map(num, Syn::Num)),
         context("token", map(token, Syn::Ident)),
         context("identifier", map(ident, Syn::Ident)),
         context("string", map(string, Syn::String)),
         context("s-expression", map(s_expr, Syn::SExpr)),
-    ))(i)
+    );
+    alt(syns)(i)
 }
 
 fn reserved(i: &I) -> ParseRes<Reserved> {
-    alt((
+    let reserveds = (
         value(Reserved::Define, tag(idents::DEFINE)),
         value(Reserved::Lambda, tag(idents::LAMBDA)),
         value(Reserved::Let, tag(idents::LET)),
@@ -99,34 +104,154 @@ fn reserved(i: &I) -> ParseRes<Reserved> {
         value(Reserved::If, tag(idents::IF)),
         value(Reserved::And, tag(idents::AND)),
         value(Reserved::Or, tag(idents::OR)),
-    ))(i)
+    );
+    alt(reserveds)(i)
+}
+
+fn num(i: &I) -> ParseRes<f64> {
+    verify(double, |n| {
+        !n.is_nan() && !n.is_subnormal() && n.is_finite()
+    })(i)
 }
 
 fn token(i: &I) -> ParseRes<&str> {
-    map_res(
-        alt((tag(idents::TRUE), tag(idents::FALSE), tag(idents::VOID))),
-        str::from_utf8,
-    )(i)
+    let tokens = (tag(idents::TRUE), tag(idents::FALSE), tag(idents::VOID));
+    map_res(alt(tokens), str::from_utf8)(i)
 }
 
 fn ident(i: &I) -> ParseRes<&str> {
     let delim = "();\"'`|[]{} \r\t\n";
     map_res(
-        preceded(
+        recognize(pair(
             not(alt((one_of("#,"), one_of(delim)))),
             take_till1(|b| delim.as_bytes().contains(&b)),
-        ),
+        )),
         str::from_utf8,
     )(i)
 }
 
 fn string(i: &I) -> ParseRes<Cow<'_, str>> {
+    let (quote, escaped) = (r#"""#, r#"\""#);
+    let contents = recognize(many0_count(alt((value('"', tag(escaped)), none_of(quote)))));
     map(
-        delimited(char('"'), take_until("\""), char('"')),
-        String::from_utf8_lossy,
+        map(
+            delimited(char('"'), contents, char('"')),
+            String::from_utf8_lossy,
+        ),
+        move |mut s| {
+            if let Some(at) = s.find(escaped) {
+                s.to_mut().replace_range(at..at + escaped.len(), quote);
+            }
+            s
+        },
     )(i)
 }
 
 fn s_expr(i: &I) -> ParseRes<Vec<Syn>> {
     delimited(char('('), syns, char(')'))(i)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const EMPTY: &[u8] = b"";
+
+    #[test]
+    fn reserved_idents() {
+        let reserved_idents = [
+            (Reserved::Define, b"define" as &[_]),
+            (Reserved::Lambda, b"lambda"),
+            (Reserved::Let, b"let"),
+            (Reserved::Cond, b"cond"),
+            (Reserved::Else, b"else"),
+            (Reserved::If, b"if"),
+            (Reserved::And, b"and"),
+            (Reserved::Or, b"or"),
+        ];
+        for (ident, input) in reserved_idents {
+            assert_eq!((EMPTY, ident), reserved(input).unwrap());
+        }
+    }
+
+    #[test]
+    fn token_idents() {
+        let token_idents = [b"#f" as &[_], b"#t", b"#!void"];
+        for input in token_idents {
+            assert_eq!(
+                (EMPTY, str::from_utf8(input).unwrap()),
+                token(input).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn other_idents() {
+        assert!(ident(b"#should-fail").is_err());
+        assert!(ident(b"(should-fail)").is_err());
+        assert_eq!((EMPTY, "should-succeed"), ident(b"should-succeed").unwrap());
+        assert_eq!((EMPTY, "a"), ident(b"a").unwrap());
+        assert_eq!((b" second" as _, "first"), ident(b"first second").unwrap());
+        assert_eq!((EMPTY, "a#b"), ident(b"a#b").unwrap());
+        assert_eq!(
+            (b"(second)" as _, "first"),
+            ident(b"first(second)").unwrap()
+        );
+    }
+
+    #[test]
+    fn nums() {
+        assert_eq!((EMPTY, 0.0), num(b"0").unwrap());
+        assert_eq!((EMPTY, 10.0), num(b"10").unwrap());
+        assert_eq!((EMPTY, -1.0), num(b"-1").unwrap());
+        assert_eq!((EMPTY, 0.5), num(b".5").unwrap());
+        assert_eq!((EMPTY, 2500.0), num(b"2.5e3").unwrap());
+        assert!(num(b"inf").is_err());
+        assert!(num(b"NaN").is_err());
+    }
+
+    #[test]
+    fn strings() {
+        assert_eq!((EMPTY, "".into()), string(br#""""#).unwrap());
+        assert_eq!((EMPTY, "foo".into()), string(br#""foo""#).unwrap());
+        assert_eq!((EMPTY, "foo bar".into()), string(br#""foo bar""#).unwrap());
+        assert_eq!((b"bar" as _, "foo".into()), string(br#""foo"bar"#).unwrap());
+        assert_eq!((EMPTY, "\"".into()), string(br#""\"""#).unwrap());
+        assert_eq!(
+            (EMPTY, "invalid: �".into()),
+            string(b"\"invalid: \xff\"").unwrap()
+        );
+    }
+
+    #[test]
+    fn s_exprs() {
+        assert_eq!((EMPTY, vec![]), s_expr(b"()").unwrap());
+        assert_eq!(
+            (EMPTY, vec![Syn::Reserved(Reserved::Define)]),
+            s_expr(b"(define)").unwrap()
+        );
+        assert_eq!((b")" as _, vec![]), s_expr(b"())").unwrap());
+        assert!(s_expr(b"))").is_err());
+        assert_eq!(
+            (
+                EMPTY,
+                vec![Syn::String("foo".into()), Syn::String("bar".into())]
+            ),
+            s_expr(br#"("foo" "bar")"#).unwrap()
+        );
+        assert_eq!(
+            (
+                EMPTY,
+                vec![Syn::Num(42.0), Syn::SExpr(vec![Syn::Num(42.0)])]
+            ),
+            s_expr(b"(42(42))").unwrap()
+        );
+        assert_eq!(
+            (
+                EMPTY,
+                vec![Syn::SExpr(vec![Syn::Num(42.0)]), Syn::SExpr(vec![])]
+            ),
+            s_expr(b"((42) (\n) )").unwrap()
+        );
+    }
 }

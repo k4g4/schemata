@@ -8,14 +8,15 @@ idents! {
     DEFINE: "define",
     LAMBDA: "lambda",
     LET:    "let",
-    CONS:   "cons",
-    CAR:    "car",
-    CDR:    "cdr",
     COND:   "cond",
     ELSE:   "else",
     IF:     "if",
     AND:    "and",
     OR:     "or",
+
+    CONS:   "cons",
+    CAR:    "car",
+    CDR:    "cdr",
 
     DISP:   "display",
     NEWL:   "newline",

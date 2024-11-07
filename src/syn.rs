@@ -7,7 +7,7 @@ use crate::{
 use anyhow::{bail, ensure, Result};
 use std::{borrow::Cow, collections::VecDeque, fmt, rc::Rc};
 
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum Syn<'src> {
     Num(f64),
     String(Cow<'src, str>),

@@ -31,14 +31,16 @@ fn main() -> Result<()> {
         debug,
         pretty,
     } = Args::parse();
+
     globals::set_debug(debug);
     globals::set_pretty(pretty);
 
     let prelude = include_bytes!("../prelude.scm");
 
     if let Ok(contents) = fs::read(&input) {
-        println!("Read {} bytes.", contents.len());
-        println!();
+        if debug {
+            println!("Read {} bytes.", contents.len());
+        }
         parse::repl(prelude, &contents)?;
         print!("-- Finished --");
     } else {

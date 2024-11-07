@@ -27,11 +27,10 @@ pub enum Token {
 
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let root = f.sign_plus();
         match self {
             Self::True => write!(f, "{}", idents::TRUE),
             Self::False => write!(f, "{}", idents::FALSE),
-            Self::Void => write!(f, "{}", if root { "" } else { idents::VOID }),
+            Self::Void => write!(f, "{}", idents::VOID),
         }
     }
 }
