@@ -206,7 +206,6 @@ impl fmt::Display for Proc<'_> {
 #[derive(Copy, Clone, Debug)]
 pub enum ListManip {
     Cons,
-    List,
     Nth(u8),
     Cxr([Cxr; 1]),
     Cxxr([Cxr; 2]),
@@ -251,8 +250,6 @@ impl ListManip {
                 Ok(Item::cons(head.clone(), tail.clone()))
             }
 
-            Self::List => Item::from_items(args.cloned().map(Ok).collect::<Vec<_>>()),
-
             Self::Nth(n) => {
                 let ([list], []) = args.get(self)?;
                 access(
@@ -286,7 +283,6 @@ impl fmt::Display for ListManip {
         };
         match self {
             Self::Cons => write!(f, "<{}>", idents::CONS),
-            Self::List => write!(f, "<{}>", idents::LIST),
             Self::Nth(0) => write!(f, "<{}>", idents::FIRST),
             Self::Nth(1) => write!(f, "<{}>", idents::SECOND),
             Self::Nth(2) => write!(f, "<{}>", idents::THIRD),

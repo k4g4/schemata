@@ -9,11 +9,6 @@
         ((not (or a b)) #f)
         (else #t)))
 
-;;(define (>= x y)
-;;    (not (< x y)))
-;;(define (<= x y)
-;;    (not (> x y)))
-
 (define (even? x) (= (remainder x 2) 0))
 (define (odd? x) (= (remainder x 2) 1))
 (define (zero? x) (= x 0))
@@ -55,6 +50,8 @@
     (if (= b 0)
         a
         (gcd b (remainder a b))))
+
+(define (list . items) items)
 
 (define nil (list))
 

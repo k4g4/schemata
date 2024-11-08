@@ -18,7 +18,6 @@ idents! {
     EXIT:       "exit",
 
     CONS:       "cons",
-    LIST:       "list",
     FIRST:      "first",
     SECOND:     "second",
     THIRD:      "third",
