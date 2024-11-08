@@ -46,6 +46,8 @@
 
 (define (identity x) x)
 
+(define (compose f g) (lambda (x) (f (g x))))
+
 (define (gcd a b)
     (if (= b 0)
         a
@@ -91,3 +93,12 @@
             (reverse_ (cons (car rem) res) (cdr rem))))
     (reverse_ nil l))
 
+(define (any pred list)
+    (define (any_ at)
+        (if (null? at) 
+            #f
+            (if (pred (car at)) #t (any_ (cdr at)))))
+    (any_ list))
+
+(define (all pred list)
+    (not (any (compose not pred) list)))
