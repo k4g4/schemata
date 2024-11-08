@@ -14,6 +14,8 @@ idents! {
     AND:        "and",
     OR:         "or",
 
+    APPLY:      "apply",
+
     CONS:       "cons",
     LIST:       "list",
     FIRST:      "first",

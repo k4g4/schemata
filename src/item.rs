@@ -110,6 +110,7 @@ impl fmt::Display for Item<'_> {
             Self::Proc(proc) => write!(f, "{proc}"),
             Self::Token(token) => write!(f, "{token}"),
             Self::Defined => write!(f, "<{}>", idents::DEFINE),
+
             Self::List(list) => {
                 if let Some(List { head, tail }) = list.as_deref() {
                     write!(f, "(")?;

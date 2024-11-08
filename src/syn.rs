@@ -61,6 +61,8 @@ impl<'src> Syn<'src> {
                     Ok(lookup)
                 } else {
                     let builtin = match ident {
+                        idents::APPLY => Item::Proc(Proc::Apply),
+
                         idents::CONS => Item::Proc(Proc::ListManip(ListManip::Cons)),
                         idents::LIST => Item::Proc(Proc::ListManip(ListManip::List)),
                         idents::FIRST => Item::Proc(Proc::ListManip(ListManip::Nth(0))),

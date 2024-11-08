@@ -24,6 +24,7 @@ pub enum Proc<'src> {
     Trunc,
     Floor,
     Ceil,
+    Apply,
     Display,
     Newline,
     Error,
@@ -75,6 +76,12 @@ impl<'src> Proc<'src> {
             Self::Ceil => {
                 let ([num], []) = NumsIter::try_from(args)?.get(self)?;
                 Ok(Item::Num(num.ceil()))
+            }
+
+            Self::Apply => {
+                let ([proc, args], []) = args.get(self)?;
+                let invoke = Item::cons(proc.clone(), args.clone());
+                invoke.apply()
             }
 
             Self::Display => {
@@ -163,6 +170,7 @@ impl fmt::Display for Proc<'_> {
             Self::Trunc => write!(f, "<{}>", idents::TRUNC),
             Self::Floor => write!(f, "<{}>", idents::FLOOR),
             Self::Ceil => write!(f, "<{}>", idents::CEIL),
+            Self::Apply => write!(f, "<{}>", idents::APPLY),
             Self::Display => write!(f, "<{}>", idents::DISP),
             Self::Newline => write!(f, "<{}>", idents::NEWL),
             Self::Error => write!(f, "<{}>", idents::ERROR),
