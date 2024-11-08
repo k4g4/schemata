@@ -1,6 +1,6 @@
 use crate::{
     globals, idents,
-    item::{ArgsIter, Item, ItemsIter, NumsIter},
+    item::{ArgsIter, Item, ItemsIter, NumsIter, Pair, Token},
     scope::{Scope, ScopeHandle},
     syn::{Defs, Syn},
 };
@@ -18,6 +18,7 @@ pub enum Proc<'src> {
     Arith(Arith),
     Cmp(Cmp),
     Trig(Trig),
+    Is(Is),
     Log,
     Exp,
     Rem,
@@ -46,6 +47,8 @@ impl<'src> Proc<'src> {
             Self::Cmp(cmp) => cmp.apply(args.try_into()?),
 
             Self::Trig(trig) => trig.apply(args.try_into()?),
+
+            Self::Is(is) => is.apply(args),
 
             Self::Log => {
                 let ([operand], [base]) = NumsIter::try_from(args)?.get(self)?;
@@ -164,6 +167,7 @@ impl fmt::Display for Proc<'_> {
             Self::Arith(arith) => write!(f, "{arith}"),
             Self::Cmp(cmp) => write!(f, "{cmp}"),
             Self::Trig(trig) => write!(f, "{trig}"),
+            Self::Is(is) => write!(f, "{is}"),
             Self::Log => write!(f, "<{}>", idents::LOG),
             Self::Exp => write!(f, "<{}>", idents::EXP),
             Self::Rem => write!(f, "<{}>", idents::REM),
@@ -207,11 +211,11 @@ impl ListManip {
         ) -> Result<Item<'src>> {
             cxrs.into_iter()
                 .try_fold(item, |item, cxr| match item {
-                    Item::List(Some(list)) => match cxr {
-                        Cxr::Car => Ok(&list.head),
-                        Cxr::Cdr => Ok(&list.tail),
+                    Item::Pair(Some(pair)) => match cxr {
+                        Cxr::Car => Ok(&pair.head),
+                        Cxr::Cdr => Ok(&pair.tail),
                     },
-                    Item::List(_) => bail!("Cannot dereference an empty list"),
+                    Item::Pair(_) => bail!("Cannot dereference an empty list"),
                     _ => bail!("Cannot dereference '{item}'"),
                 })
                 .map(Clone::clone)
@@ -451,6 +455,61 @@ impl fmt::Display for Trig {
             Self::Asinh => write!(f, "<{}>", idents::ASINH),
             Self::Acosh => write!(f, "<{}>", idents::ACOSH),
             Self::Atanh => write!(f, "<{}>", idents::ATANH),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum Is {
+    Bool,
+    Int,
+    List,
+    Number,
+    Null,
+    Pair,
+    Proc,
+    String,
+}
+
+impl Is {
+    fn apply<'src>(self, args: ItemsIter<'_, 'src>) -> Result<Item<'src>> {
+        let ([item], []) = args.get(self)?;
+        let is = match (self, item) {
+            (Self::Bool, Item::Token(Token::True) | Item::Token(Token::False)) => true,
+            (Self::Int, Item::Num(n)) if *n == n.trunc() => true,
+            (Self::Number, Item::Num(_)) => true,
+            (Self::Null, Item::Pair(None)) => true,
+            (Self::Pair, Item::Pair(_)) => true,
+            (Self::Proc, Item::Proc(_)) => true,
+            (Self::String, Item::String(_)) => true,
+            (Self::List, Item::Pair(pair)) => 'traverse: {
+                let mut pair = pair;
+                while let Some(Pair { tail, .. }) = pair.as_deref() {
+                    if let Item::Pair(next_pair) = tail {
+                        pair = next_pair;
+                    } else {
+                        break 'traverse false;
+                    }
+                }
+                true
+            }
+            _ => false,
+        };
+        Ok(Item::bool(is))
+    }
+}
+
+impl fmt::Display for Is {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Bool => write!(f, "<{}>", idents::IS_BOOL),
+            Self::Int => write!(f, "<{}>", idents::IS_INT),
+            Self::List => write!(f, "<{}>", idents::IS_LIST),
+            Self::Number => write!(f, "<{}>", idents::IS_NUMBER),
+            Self::Null => write!(f, "<{}>", idents::IS_NULL),
+            Self::Pair => write!(f, "<{}>", idents::IS_PAIR),
+            Self::Proc => write!(f, "<{}>", idents::IS_PROC),
+            Self::String => write!(f, "<{}>", idents::IS_STRING),
         }
     }
 }

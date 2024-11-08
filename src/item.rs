@@ -6,14 +6,14 @@ use std::{array, borrow::Cow, f64, fmt, iter::FusedIterator, rc::Rc};
 pub enum Item<'src> {
     Num(f64),
     String(Cow<'src, str>),
-    List(Option<Rc<List<'src>>>),
+    Pair(Option<Rc<Pair<'src>>>),
     Proc(Proc<'src>),
     Token(Token),
     Defined,
 }
 
 #[derive(Clone, Debug)]
-pub struct List<'src> {
+pub struct Pair<'src> {
     pub head: Item<'src>,
     pub tail: Item<'src>,
 }
@@ -37,11 +37,11 @@ impl fmt::Display for Token {
 
 impl<'src> Item<'src> {
     pub fn nil() -> Self {
-        Self::List(None)
+        Self::Pair(None)
     }
 
     pub fn cons(head: Self, tail: Self) -> Self {
-        Self::List(Some(Rc::new(List { head, tail })))
+        Self::Pair(Some(Rc::new(Pair { head, tail })))
     }
 
     pub fn bool(bool: bool) -> Self {
@@ -64,23 +64,23 @@ impl<'src> Item<'src> {
         !matches!(self, Self::Token(Token::False))
     }
 
-    fn iter(&self) -> ItemsIter<'_, 'src> {
-        ItemsIter(if let Self::List(list) = self {
-            list.as_deref()
+    pub fn iter(&self) -> ItemsIter<'_, 'src> {
+        ItemsIter(if let Self::Pair(pair) = self {
+            pair.as_deref()
         } else {
             None
         })
     }
 
     pub fn apply(self) -> Result<Self> {
-        if let Self::List(list) = &self {
-            match list.as_deref() {
-                Some(List {
+        if let Self::Pair(pair) = &self {
+            match pair.as_deref() {
+                Some(Pair {
                     head: Self::Proc(proc),
                     tail,
                 }) => proc.apply(tail.iter()),
 
-                Some(List { head, .. }) => bail!("'{head}' is not a procedure"),
+                Some(Pair { head, .. }) => bail!("'{head}' is not a procedure"),
 
                 None => bail!("'()' cannot be evaluated"),
             }
@@ -111,8 +111,8 @@ impl fmt::Display for Item<'_> {
             Self::Token(token) => write!(f, "{token}"),
             Self::Defined => write!(f, "<{}>", idents::DEFINE),
 
-            Self::List(list) => {
-                if let Some(List { head, tail }) = list.as_deref() {
+            Self::Pair(pair) => {
+                if let Some(Pair { head, tail }) = pair.as_deref() {
                     write!(f, "(")?;
                     if pretty {
                         writeln!(f)?;
@@ -126,9 +126,9 @@ impl fmt::Display for Item<'_> {
                             write!(f, "{head} ")?;
                         }
                         (head, tail) = match tail {
-                            Self::List(Some(list)) => (&list.head, &list.tail),
+                            Self::Pair(Some(pair)) => (&pair.head, &pair.tail),
 
-                            Self::List(_) => break,
+                            Self::Pair(_) => break,
 
                             _ => {
                                 if pretty {
@@ -158,15 +158,15 @@ impl fmt::Display for Item<'_> {
 }
 
 #[derive(Clone, Debug)]
-pub struct ItemsIter<'a, 'src>(Option<&'a List<'src>>);
+pub struct ItemsIter<'a, 'src>(Option<&'a Pair<'src>>);
 
 impl<'a, 'src> Iterator for ItemsIter<'a, 'src> {
     type Item = &'a Item<'src>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.0.map(|List { head, tail }| {
-            if let Item::List(list) = tail {
-                self.0 = list.as_deref();
+        self.0.map(|Pair { head, tail }| {
+            if let Item::Pair(pair) = tail {
+                self.0 = pair.as_deref();
             } else {
                 self.0 = None;
             }

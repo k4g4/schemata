@@ -15,6 +15,7 @@ idents! {
     OR:         "or",
 
     APPLY:      "apply",
+    EXIT:       "exit",
 
     CONS:       "cons",
     LIST:       "list",
@@ -67,4 +68,13 @@ idents! {
     GE:         ">=",
     LT:         "<",
     LE:         "<=",
+
+    IS_BOOL:    "boolean?",
+    IS_INT:     "integer?",
+    IS_LIST:    "list?",
+    IS_NUMBER:  "number?",
+    IS_NULL:    "null?",
+    IS_PAIR:    "pair?",
+    IS_PROC:    "procedure?",
+    IS_STRING:  "string?",
 }

@@ -1,11 +1,11 @@
 use crate::{
     idents,
     item::Item,
-    proc::{Arith, Cmp, Cxr, ListManip, Proc, Trig},
+    proc::{Arith, Cmp, Cxr, Is, ListManip, Proc, Trig},
     scope::Scope,
 };
 use anyhow::{bail, ensure, Result};
-use std::{array, borrow::Cow, fmt, rc::Rc};
+use std::{array, borrow::Cow, fmt, process, rc::Rc};
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum Syn<'src> {
@@ -62,6 +62,10 @@ impl<'src> Syn<'src> {
                 } else {
                     let builtin = match ident {
                         idents::APPLY => Item::Proc(Proc::Apply),
+                        idents::EXIT => {
+                            print!("-- Exited --");
+                            process::exit(0)
+                        }
 
                         idents::CONS => Item::Proc(Proc::ListManip(ListManip::Cons)),
                         idents::LIST => Item::Proc(Proc::ListManip(ListManip::List)),
@@ -114,6 +118,15 @@ impl<'src> Syn<'src> {
                         idents::DISP => Item::Proc(Proc::Display),
                         idents::NEWL => Item::Proc(Proc::Newline),
                         idents::ERROR => Item::Proc(Proc::Error),
+
+                        idents::IS_BOOL => Item::Proc(Proc::Is(Is::Bool)),
+                        idents::IS_INT => Item::Proc(Proc::Is(Is::Int)),
+                        idents::IS_LIST => Item::Proc(Proc::Is(Is::List)),
+                        idents::IS_NUMBER => Item::Proc(Proc::Is(Is::Number)),
+                        idents::IS_NULL => Item::Proc(Proc::Is(Is::Null)),
+                        idents::IS_PAIR => Item::Proc(Proc::Is(Is::Pair)),
+                        idents::IS_PROC => Item::Proc(Proc::Is(Is::Proc)),
+                        idents::IS_STRING => Item::Proc(Proc::Is(Is::String)),
 
                         _ => {
                             if let [b'c', as_and_ds @ .., b'r'] = ident.as_bytes() {
