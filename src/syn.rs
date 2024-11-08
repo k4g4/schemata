@@ -1,11 +1,11 @@
 use crate::{
     idents,
-    item::{Item, Token},
-    proc::{Arith, Cmp, ListManip, Proc, Trig},
+    item::Item,
+    proc::{Arith, Cmp, Cxr, ListManip, Proc, Trig},
     scope::Scope,
 };
 use anyhow::{bail, ensure, Result};
-use std::{borrow::Cow, collections::VecDeque, fmt, rc::Rc};
+use std::{array, borrow::Cow, fmt, rc::Rc};
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum Syn<'src> {
@@ -62,8 +62,17 @@ impl<'src> Syn<'src> {
                 } else {
                     let builtin = match ident {
                         idents::CONS => Item::Proc(Proc::ListManip(ListManip::Cons)),
-                        idents::CAR => Item::Proc(Proc::ListManip(ListManip::Car)),
-                        idents::CDR => Item::Proc(Proc::ListManip(ListManip::Cdr)),
+                        idents::LIST => Item::Proc(Proc::ListManip(ListManip::List)),
+                        idents::FIRST => Item::Proc(Proc::ListManip(ListManip::Nth(0))),
+                        idents::SECOND => Item::Proc(Proc::ListManip(ListManip::Nth(1))),
+                        idents::THIRD => Item::Proc(Proc::ListManip(ListManip::Nth(2))),
+                        idents::FOURTH => Item::Proc(Proc::ListManip(ListManip::Nth(3))),
+                        idents::FIFTH => Item::Proc(Proc::ListManip(ListManip::Nth(4))),
+                        idents::SIXTH => Item::Proc(Proc::ListManip(ListManip::Nth(5))),
+                        idents::SEVENTH => Item::Proc(Proc::ListManip(ListManip::Nth(6))),
+                        idents::EIGHTH => Item::Proc(Proc::ListManip(ListManip::Nth(7))),
+                        idents::NINTH => Item::Proc(Proc::ListManip(ListManip::Nth(8))),
+                        idents::TENTH => Item::Proc(Proc::ListManip(ListManip::Nth(9))),
 
                         idents::TRUE => Item::bool(true),
                         idents::FALSE => Item::bool(false),
@@ -105,7 +114,29 @@ impl<'src> Syn<'src> {
                         idents::ERROR => Item::Proc(Proc::Error),
 
                         _ => {
-                            bail!("Failed to find definition for '{ident}'");
+                            if let [b'c', as_and_ds @ .., b'r'] = ident.as_bytes() {
+                                ensure!(
+                                    as_and_ds.iter().all(|a_or_d| matches!(a_or_d, b'a' | b'd')),
+                                    "Failed to find definition for '{ident}'"
+                                );
+                                fn get_cxr<const LEN: usize>(as_and_ds: &[u8]) -> [Cxr; LEN] {
+                                    array::from_fn(|i| match as_and_ds[i] {
+                                        b'a' => Cxr::Car,
+                                        b'd' => Cxr::Cdr,
+                                        _ => panic!("should have already checked as and ds"),
+                                    })
+                                }
+                                let list_manip = match as_and_ds.len() {
+                                    1 => ListManip::Cxr(get_cxr(as_and_ds)),
+                                    2 => ListManip::Cxxr(get_cxr(as_and_ds)),
+                                    3 => ListManip::Cxxxr(get_cxr(as_and_ds)),
+                                    4 => ListManip::Cxxxxr(get_cxr(as_and_ds)),
+                                    _ => bail!("Failed to find definition for '{ident}'"),
+                                };
+                                Item::Proc(Proc::ListManip(list_manip))
+                            } else {
+                                bail!("Failed to find definition for '{ident}'")
+                            }
                         }
                     };
 
@@ -213,11 +244,10 @@ impl<'src> Syn<'src> {
                             scope_handle: scope.get_handle(),
                             body,
                         });
-                        let mut defs = defs
-                            .map(|def| def.eval(scope, Defs::NotAllowed))
-                            .collect::<VecDeque<_>>();
-                        defs.push_front(Ok(proc));
-                        Item::from_items(defs)?
+                        let mut items = Vec::with_capacity(defs.len() + 1);
+                        items.push(Ok(proc));
+                        items.extend(defs.map(|def| def.eval(scope, Defs::NotAllowed)));
+                        Item::from_items(items)?
                     };
                     lambda.apply()
                 }
@@ -276,11 +306,7 @@ impl<'src> Syn<'src> {
                     } else if let Some(alt) = syns.get(2) {
                         alt.eval(scope, Defs::NotAllowed)
                     } else {
-                        bail!(
-                            "No alternative value for '{}' with {} predicate",
-                            idents::IF,
-                            idents::FALSE
-                        );
+                        Ok(Item::void())
                     }
                 }
 

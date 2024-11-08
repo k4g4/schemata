@@ -6,9 +6,10 @@ use crate::{
 };
 use anyhow::{bail, ensure, Context, Result};
 use std::{
-    f64, fmt,
+    f64, fmt, iter,
     ops::{Add, Div, Mul, Sub},
     rc::Rc,
+    str,
 };
 
 #[derive(Clone, Debug)]
@@ -176,34 +177,71 @@ impl fmt::Display for Proc<'_> {
 #[derive(Copy, Clone, Debug)]
 pub enum ListManip {
     Cons,
+    List,
+    Nth(u8),
+    Cxr([Cxr; 1]),
+    Cxxr([Cxr; 2]),
+    Cxxxr([Cxr; 3]),
+    Cxxxxr([Cxr; 4]),
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum Cxr {
     Car,
     Cdr,
 }
 
 impl ListManip {
     fn apply<'src>(self, args: ItemsIter<'_, 'src>) -> Result<Item<'src>> {
+        fn access<'src, 'item>(
+            cxrs: impl IntoIterator<Item = Cxr>,
+            item: &Item<'src>,
+        ) -> Result<Item<'src>> {
+            cxrs.into_iter()
+                .try_fold(item, |item, cxr| match item {
+                    Item::List(Some(list)) => match cxr {
+                        Cxr::Car => Ok(&list.head),
+                        Cxr::Cdr => Ok(&list.tail),
+                    },
+                    Item::List(_) => bail!("Cannot dereference an empty list"),
+                    _ => bail!("Cannot dereference '{item}'"),
+                })
+                .map(Clone::clone)
+        }
+
         match self {
             Self::Cons => {
                 let ([head, tail], []) = args.get(self)?;
                 Ok(Item::cons(head.clone(), tail.clone()))
             }
 
-            Self::Car => {
-                let ([item], []) = args.get(self)?;
-                if let Item::List(Some(list)) = item {
-                    Ok(list.head.clone())
-                } else {
-                    bail!("Cannot retrieve head from '{}'", item);
-                }
+            Self::List => Item::from_items(args.cloned().map(Ok).collect::<Vec<_>>()),
+
+            Self::Nth(n) => {
+                let ([list], []) = args.get(self)?;
+                access(
+                    iter::repeat(Cxr::Cdr)
+                        .take(n as _)
+                        .chain(iter::once(Cxr::Car)),
+                    list,
+                )
             }
 
-            Self::Cdr => {
-                let ([item], []) = args.get(self)?;
-                if let Item::List(Some(list)) = item {
-                    Ok(list.tail.clone())
-                } else {
-                    bail!("Cannot retrieve tail from '{}'", item);
-                }
+            Self::Cxr(cxrs) => {
+                let ([list], []) = args.get(self)?;
+                access(cxrs, list)
+            }
+            Self::Cxxr(cxrs) => {
+                let ([list], []) = args.get(self)?;
+                access(cxrs, list)
+            }
+            Self::Cxxxr(cxrs) => {
+                let ([list], []) = args.get(self)?;
+                access(cxrs, list)
+            }
+            Self::Cxxxxr(cxrs) => {
+                let ([list], []) = args.get(self)?;
+                access(cxrs, list)
             }
         }
     }
@@ -211,10 +249,35 @@ impl ListManip {
 
 impl fmt::Display for ListManip {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut cxr_helper = |cxrs: &[_]| {
+            let mut as_and_ds = [0; 4];
+            for (i, cxr) in cxrs.iter().enumerate() {
+                as_and_ds[i] = match cxr {
+                    Cxr::Car => b'a',
+                    Cxr::Cdr => b'd',
+                };
+            }
+            let as_and_ds = str::from_utf8(&as_and_ds[..cxrs.len()]).expect("must be utf8");
+            write!(f, "<c{}r>", as_and_ds)
+        };
         match self {
             Self::Cons => write!(f, "<{}>", idents::CONS),
-            Self::Car => write!(f, "<{}>", idents::CAR),
-            Self::Cdr => write!(f, "<{}>", idents::CDR),
+            Self::List => write!(f, "<{}>", idents::LIST),
+            Self::Nth(0) => write!(f, "<{}>", idents::FIRST),
+            Self::Nth(1) => write!(f, "<{}>", idents::SECOND),
+            Self::Nth(2) => write!(f, "<{}>", idents::THIRD),
+            Self::Nth(3) => write!(f, "<{}>", idents::FOURTH),
+            Self::Nth(4) => write!(f, "<{}>", idents::FIFTH),
+            Self::Nth(5) => write!(f, "<{}>", idents::SIXTH),
+            Self::Nth(6) => write!(f, "<{}>", idents::SEVENTH),
+            Self::Nth(7) => write!(f, "<{}>", idents::EIGHTH),
+            Self::Nth(8) => write!(f, "<{}>", idents::NINTH),
+            Self::Nth(9) => write!(f, "<{}>", idents::TENTH),
+            Self::Nth(n) => panic!("Nth created with unexpected index: {n}"),
+            Self::Cxr(cxrs) => cxr_helper(cxrs),
+            Self::Cxxr(cxrs) => cxr_helper(cxrs),
+            Self::Cxxxr(cxrs) => cxr_helper(cxrs),
+            Self::Cxxxxr(cxrs) => cxr_helper(cxrs),
         }
     }
 }
@@ -352,7 +415,7 @@ pub enum Trig {
 impl Trig {
     fn apply<'src>(self, args: NumsIter<'_, 'src>) -> Result<Item<'src>> {
         let ([num], []) = args.get(self)?;
-        Ok(Item::Num(match self {
+        let trig = match self {
             Self::Sin => f64::sin,
             Self::Cos => f64::cos,
             Self::Tan => f64::tan,
@@ -365,7 +428,8 @@ impl Trig {
             Self::Asinh => f64::asinh,
             Self::Acosh => f64::acosh,
             Self::Atanh => f64::atanh,
-        }(num)))
+        };
+        Ok(Item::Num(trig(num)))
     }
 }
 

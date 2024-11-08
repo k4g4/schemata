@@ -18,6 +18,10 @@
 
 (define (square x) (* x x))
 (define (cube x) (* x x x))
+(define (pow x p)
+    (define (pow_ res p)
+        (if (= p 0) res (pow_ (* res x) (- p 1))))
+    (pow_ 1 p))
 
 (define (sqrt x)
     (define e .00001)
