@@ -119,26 +119,43 @@ impl<'src> Proc<'src> {
                 if debug {
                     eprint!("{}(", name.unwrap_or(idents::LAMBDA));
                 }
-                let mut args = args;
                 let scope = Scope::new_local(scope)?;
-                for (i, param) in params.iter().enumerate() {
+                let mut args = args;
+                let before_dot_len = params
+                    .iter()
+                    .position(|&param| param == ".")
+                    .unwrap_or(params.len());
+                let before_dot_iter = params[..before_dot_len].iter().enumerate();
+                for (i, &param) in before_dot_iter {
                     if let Some(item) = args.next() {
                         if debug {
                             eprint!("{param}: {item}");
-                            if i != params.len() - 1 {
+                            if i != before_dot_len - 1 {
                                 eprint!(", ");
                             }
                         }
                         scope.add(param, item.clone())?;
                     } else {
-                        bail!("Expected {} parameter(s), got {i}", params.len());
+                        bail!("Expected {} argument(s), received {i}", before_dot_len);
                     }
                 }
-                ensure!(
-                    args.next().is_none(),
-                    "Too many parameters for {self}, expected {}",
-                    params.len()
-                );
+                if before_dot_len < params.len() {
+                    let &rest_param = params.last().expect("dot is before last param");
+                    let rest = Item::from_items(args.cloned().map(Ok).collect::<Vec<_>>())?;
+                    if debug {
+                        if before_dot_len != 0 {
+                            eprint!(", ");
+                        }
+                        eprint!("{rest_param}: {rest}");
+                    }
+                    scope.add(rest_param, rest)?;
+                } else {
+                    ensure!(
+                        args.next().is_none(),
+                        "Too many arguments for {self}, expected {}",
+                        params.len()
+                    );
+                }
                 if debug {
                     eprintln!(")");
                     eprintln!();

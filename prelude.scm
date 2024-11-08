@@ -56,6 +56,8 @@
         a
         (gcd b (remainder a b))))
 
+(define nil (list))
+
 (define (length list)
     (define (length_ at count)
         (if (null? at)
@@ -71,7 +73,7 @@
             (map proc (cdr list)))))
 
 (define (filter pred list)
-    (if (null? (cdr list))
+    (if (null? list)
         list
         (let ((rest (filter pred (cdr list))))
             (if (pred (car list))
@@ -84,4 +86,11 @@
         (combiner
             (car list)
             (reduce combiner (cdr list)))))
+
+(define (reverse l)
+    (define (reverse_ res rem)
+        (if (null? rem)
+            res
+            (reverse_ (cons (car rem) res) (cdr rem))))
+    (reverse_ nil l))
 

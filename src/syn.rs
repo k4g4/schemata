@@ -56,6 +56,8 @@ impl<'src> Syn<'src> {
 
             Self::String(string) => Ok(Item::String(string.clone())),
 
+            Self::Ident(".") => bail!("Improperly placed dot"),
+
             &Self::Ident(ident) => {
                 if let Some(lookup) = scope.lookup(ident)? {
                     Ok(lookup)
@@ -161,52 +163,32 @@ impl<'src> Syn<'src> {
 
             Self::Reserved(reserved) => bail!("Unexpected '{reserved}'"),
 
-            Self::SExpr(group) => match group.as_slice() {
-                [] => Ok(Item::nil()),
-
-                [Self::Reserved(Reserved::Define), ..] if defs == Defs::NotAllowed => {
-                    bail!("Ill-placed '{}'", idents::DEFINE);
-                }
-
-                [Self::Reserved(Reserved::Define), Self::Ident(ident), def] => {
-                    scope.add(ident, def.eval(scope, Defs::NotAllowed)?)?;
-                    Ok(Item::Defined)
-                }
-
-                [Self::Reserved(Reserved::Define), Self::SExpr(signature), body @ ..] => {
+            Self::SExpr(group) => {
+                fn create_proc<'src>(
+                    scope: &Rc<Scope<'src>>,
+                    name: Option<&'src str>,
+                    params: &[Syn<'src>],
+                    body: &'src [Syn<'src>],
+                ) -> Result<Item<'src>> {
                     ensure!(!body.is_empty(), "Empty '{}' body", idents::DEFINE);
-                    match signature.as_slice() {
-                        [Self::Ident(ident), params @ ..] => {
-                            let params = params
-                                .iter()
-                                .map(|param| {
-                                    if let &Syn::Ident(ident) = param {
-                                        Ok(ident)
-                                    } else {
-                                        bail!("'{param}' is not a valid parameter name");
-                                    }
-                                })
-                                .collect::<Result<_>>()?;
-                            let proc = Item::Proc(Proc::Compound {
-                                name: Some(ident),
-                                params,
-                                scope_handle: scope.get_handle(),
-                                body,
-                            });
-                            scope.add(ident, proc)?;
-                            Ok(Item::Defined)
-                        }
-
-                        _ => bail!("Malformed signature"),
+                    if let Some(Syn::Ident(duplicate)) = params
+                        .iter()
+                        .find(|param| params.iter().filter(|p| p == param).count() != 1)
+                    {
+                        bail!(
+                            "Duplicate parameter '{duplicate}' specified for {}",
+                            name.unwrap_or(idents::LAMBDA)
+                        );
                     }
-                }
-
-                [Self::Reserved(Reserved::Define), ..] => {
-                    bail!("Malformed '{}'", idents::DEFINE)
-                }
-
-                [Self::Reserved(Reserved::Lambda), Self::SExpr(params), body @ ..] => {
-                    ensure!(!body.is_empty(), "Empty '{}' body", idents::LAMBDA);
+                    if let Some(dot_pos) =
+                        params.iter().position(|syn| matches!(syn, Syn::Ident(".")))
+                    {
+                        ensure!(
+                            dot_pos == params.len().wrapping_sub(2),
+                            "Misplaced dot in signature in {}",
+                            name.unwrap_or(idents::LAMBDA)
+                        );
+                    }
                     let params = params
                         .iter()
                         .map(|param| {
@@ -218,133 +200,166 @@ impl<'src> Syn<'src> {
                         })
                         .collect::<Result<_>>()?;
                     Ok(Item::Proc(Proc::Compound {
-                        name: None,
+                        name,
                         params,
                         scope_handle: scope.get_handle(),
                         body,
                     }))
                 }
 
-                [Self::Reserved(Reserved::Lambda), ..] => {
-                    bail!("Malformed '{}'", idents::LAMBDA)
-                }
+                match group.as_slice() {
+                    [] => Ok(Item::nil()),
 
-                [Self::Reserved(Reserved::Let), Self::SExpr(mappings), body @ ..] => {
-                    ensure!(!body.is_empty(), "Empty '{}' body", idents::LET);
-                    let params = mappings
-                        .iter()
-                        .map(|mapping| {
-                            if let Syn::SExpr(group) = mapping {
-                                if let &[Self::Ident(param), _] = group.as_slice() {
-                                    Ok(param)
+                    [Self::Reserved(Reserved::Define), ..] if defs == Defs::NotAllowed => {
+                        bail!("Ill-placed '{}'", idents::DEFINE);
+                    }
+
+                    [Self::Reserved(Reserved::Define), Self::Ident(ident), def] => {
+                        scope.add(ident, def.eval(scope, Defs::NotAllowed)?)?;
+                        Ok(Item::Defined)
+                    }
+
+                    [Self::Reserved(Reserved::Define), Self::SExpr(signature), body @ ..] => {
+                        if let [Self::Ident(ident), params @ ..] = signature.as_slice() {
+                            scope.add(ident, create_proc(scope, Some(ident), params, body)?)?;
+                            Ok(Item::Defined)
+                        } else {
+                            bail!("Malformed signature")
+                        }
+                    }
+
+                    [Self::Reserved(Reserved::Define), ..] => {
+                        bail!("Malformed '{}'", idents::DEFINE)
+                    }
+
+                    [Self::Reserved(Reserved::Lambda), Self::SExpr(params), body @ ..] => {
+                        create_proc(scope, None, params, body)
+                    }
+
+                    [Self::Reserved(Reserved::Lambda), ..] => {
+                        bail!("Malformed '{}'", idents::LAMBDA)
+                    }
+
+                    [Self::Reserved(Reserved::Let), Self::SExpr(mappings), body @ ..] => {
+                        ensure!(!body.is_empty(), "Empty '{}' body", idents::LET);
+                        let params = mappings
+                            .iter()
+                            .map(|mapping| {
+                                if let Syn::SExpr(group) = mapping {
+                                    if let &[Self::Ident(param), _] = group.as_slice() {
+                                        Ok(param)
+                                    } else {
+                                        bail!("Malformed '{}'", idents::LET);
+                                    }
                                 } else {
                                     bail!("Malformed '{}'", idents::LET);
                                 }
+                            })
+                            .collect::<Result<_>>()?;
+                        let defs = mappings.iter().map(|mapping| {
+                            if let Syn::SExpr(group) = mapping {
+                                &group[1]
                             } else {
-                                bail!("Malformed '{}'", idents::LET);
+                                unreachable!("already checked")
                             }
-                        })
-                        .collect::<Result<_>>()?;
-                    let defs = mappings.iter().map(|mapping| {
-                        if let Syn::SExpr(group) = mapping {
-                            &group[1]
-                        } else {
-                            unreachable!("already checked")
-                        }
-                    });
-                    let lambda = {
-                        let proc = Item::Proc(Proc::Compound {
-                            name: None,
-                            params,
-                            scope_handle: scope.get_handle(),
-                            body,
                         });
-                        let mut items = Vec::with_capacity(defs.len() + 1);
-                        items.push(Ok(proc));
-                        items.extend(defs.map(|def| def.eval(scope, Defs::NotAllowed)));
-                        Item::from_items(items)?
-                    };
-                    lambda.apply()
-                }
+                        let lambda = {
+                            let proc = Item::Proc(Proc::Compound {
+                                name: None,
+                                params,
+                                scope_handle: scope.get_handle(),
+                                body,
+                            });
+                            let mut items = Vec::with_capacity(defs.len() + 1);
+                            items.push(Ok(proc));
+                            items.extend(defs.map(|def| def.eval(scope, Defs::NotAllowed)));
+                            Item::from_items(items)?
+                        };
+                        lambda.apply()
+                    }
 
-                [Self::Reserved(Reserved::Let), ..] => {
-                    bail!("Malformed '{}'", idents::LET)
-                }
+                    [Self::Reserved(Reserved::Let), ..] => {
+                        bail!("Malformed '{}'", idents::LET)
+                    }
 
-                [Self::Reserved(Reserved::Cond), conds @ ..] if !conds.is_empty() => {
-                    for (i, cond) in conds.iter().enumerate() {
-                        if let Self::SExpr(group) = cond {
-                            match group.as_slice() {
-                                [] => bail!("Malformed '{}'", idents::COND),
+                    [Self::Reserved(Reserved::Cond), conds @ ..] if !conds.is_empty() => {
+                        for (i, cond) in conds.iter().enumerate() {
+                            if let Self::SExpr(group) = cond {
+                                match group.as_slice() {
+                                    [] => bail!("Malformed '{}'", idents::COND),
 
-                                [Self::Reserved(Reserved::Else)] => {
-                                    bail!("Malformed '{}'", idents::ELSE);
-                                }
+                                    [Self::Reserved(Reserved::Else)] => {
+                                        bail!("Malformed '{}'", idents::ELSE);
+                                    }
 
-                                [Self::Reserved(Reserved::Else), syn, syns @ ..] => {
-                                    return if i == conds.len() - 1 {
-                                        let mut item = syn.eval(scope, Defs::NotAllowed)?;
-                                        for syn in syns {
-                                            item = syn.eval(scope, Defs::NotAllowed)?;
+                                    [Self::Reserved(Reserved::Else), syn, syns @ ..] => {
+                                        return if i == conds.len() - 1 {
+                                            let mut item = syn.eval(scope, Defs::NotAllowed)?;
+                                            for syn in syns {
+                                                item = syn.eval(scope, Defs::NotAllowed)?;
+                                            }
+                                            item.apply()
+                                        } else {
+                                            bail!("Ill-placed '{}'", idents::ELSE);
+                                        };
+                                    }
+
+                                    [cond, syns @ ..] => {
+                                        let mut item =
+                                            cond.eval(scope, Defs::NotAllowed)?.apply()?;
+                                        if item.is_truthy() {
+                                            for syn in syns {
+                                                item = syn.eval(scope, Defs::NotAllowed)?;
+                                            }
+                                            return item.apply();
                                         }
-                                        item.apply()
-                                    } else {
-                                        bail!("Ill-placed '{}'", idents::ELSE);
-                                    };
-                                }
-
-                                [cond, syns @ ..] => {
-                                    let mut item = cond.eval(scope, Defs::NotAllowed)?.apply()?;
-                                    if item.is_truthy() {
-                                        for syn in syns {
-                                            item = syn.eval(scope, Defs::NotAllowed)?;
-                                        }
-                                        return item.apply();
                                     }
                                 }
+                            } else {
+                                bail!("Malformed '{}'", idents::COND);
                             }
+                        }
+
+                        bail!("All conditions are '{}'", idents::FALSE);
+                    }
+
+                    [Self::Reserved(Reserved::Cond), ..] => bail!("Malformed '{}'", idents::COND),
+
+                    [Self::Reserved(Reserved::If), syns @ ..] => {
+                        ensure!(matches!(syns.len(), 2 | 3), "Malformed '{}'", idents::IF);
+                        let cond = syns[0].eval(scope, Defs::NotAllowed)?.apply()?;
+                        if cond.is_truthy() {
+                            syns[1].eval(scope, Defs::NotAllowed)
+                        } else if let Some(alt) = syns.get(2) {
+                            alt.eval(scope, Defs::NotAllowed)
                         } else {
-                            bail!("Malformed '{}'", idents::COND);
+                            Ok(Item::void())
                         }
                     }
 
-                    bail!("All conditions are '{}'", idents::FALSE);
-                }
+                    [Self::Reserved(reserved @ (Reserved::And | Reserved::Or)), syns @ ..] => {
+                        let is_and = *reserved == Reserved::And;
+                        let initial = Item::bool(!is_and);
 
-                [Self::Reserved(Reserved::Cond), ..] => bail!("Malformed '{}'", idents::COND),
+                        syns.iter()
+                            .try_fold((false, initial), |(done, prev), syn| {
+                                if done {
+                                    Ok((true, prev))
+                                } else {
+                                    let item = syn.eval(scope, Defs::NotAllowed)?.apply()?;
+                                    let done = item.is_truthy() ^ is_and;
+                                    Ok((done, item))
+                                }
+                            })
+                            .map(|(_, item)| item)
+                    }
 
-                [Self::Reserved(Reserved::If), syns @ ..] => {
-                    ensure!(matches!(syns.len(), 2 | 3), "Malformed '{}'", idents::IF);
-                    let cond = syns[0].eval(scope, Defs::NotAllowed)?.apply()?;
-                    if cond.is_truthy() {
-                        syns[1].eval(scope, Defs::NotAllowed)
-                    } else if let Some(alt) = syns.get(2) {
-                        alt.eval(scope, Defs::NotAllowed)
-                    } else {
-                        Ok(Item::void())
+                    _ => {
+                        Item::from_items(group.iter().map(|syn| syn.eval(scope, Defs::NotAllowed)))
+                            .and_then(Item::apply)
                     }
                 }
-
-                [Self::Reserved(reserved @ (Reserved::And | Reserved::Or)), syns @ ..] => {
-                    let is_and = *reserved == Reserved::And;
-                    let initial = Item::bool(!is_and);
-
-                    syns.iter()
-                        .try_fold((false, initial), |(done, prev), syn| {
-                            if done {
-                                Ok((true, prev))
-                            } else {
-                                let item = syn.eval(scope, Defs::NotAllowed)?.apply()?;
-                                let done = item.is_truthy() ^ is_and;
-                                Ok((done, item))
-                            }
-                        })
-                        .map(|(_, item)| item)
-                }
-
-                _ => Item::from_items(group.iter().map(|syn| syn.eval(scope, Defs::NotAllowed)))
-                    .and_then(Item::apply),
-            },
+            }
         }
     }
 }
