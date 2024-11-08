@@ -194,7 +194,7 @@ pub enum Cxr {
 impl ListManip {
     fn apply<'src>(self, args: ItemsIter<'_, 'src>) -> Result<Item<'src>> {
         fn access<'src, 'item>(
-            cxrs: impl IntoIterator<Item = Cxr>,
+            cxrs: impl Iterator<Item = Cxr>,
             item: &Item<'src>,
         ) -> Result<Item<'src>> {
             cxrs.into_iter()
@@ -207,6 +207,13 @@ impl ListManip {
                     _ => bail!("Cannot dereference '{item}'"),
                 })
                 .map(Clone::clone)
+        }
+
+        macro_rules! cxr_impl {
+            ($cxrs:ident) => {{
+                let ([list], []) = args.get(self)?;
+                access($cxrs.into_iter().rev(), list)
+            }};
         }
 
         match self {
@@ -227,22 +234,10 @@ impl ListManip {
                 )
             }
 
-            Self::Cxr(cxrs) => {
-                let ([list], []) = args.get(self)?;
-                access(cxrs, list)
-            }
-            Self::Cxxr(cxrs) => {
-                let ([list], []) = args.get(self)?;
-                access(cxrs, list)
-            }
-            Self::Cxxxr(cxrs) => {
-                let ([list], []) = args.get(self)?;
-                access(cxrs, list)
-            }
-            Self::Cxxxxr(cxrs) => {
-                let ([list], []) = args.get(self)?;
-                access(cxrs, list)
-            }
+            Self::Cxr(cxrs) => cxr_impl!(cxrs),
+            Self::Cxxr(cxrs) => cxr_impl!(cxrs),
+            Self::Cxxxr(cxrs) => cxr_impl!(cxrs),
+            Self::Cxxxxr(cxrs) => cxr_impl!(cxrs),
         }
     }
 }
