@@ -139,6 +139,7 @@ impl<'src> Syn<'src> {
                         idents::IS_PAIR => Item::Proc(Proc::Is(Is::Pair)),
                         idents::IS_PROC => Item::Proc(Proc::Is(Is::Proc)),
                         idents::IS_STRING => Item::Proc(Proc::Is(Is::String)),
+                        idents::IS_SYMBOL => Item::Proc(Proc::Is(Is::Symbol)),
 
                         _ => {
                             if let [b'c', as_and_ds @ .., b'r'] = ident.as_bytes() {

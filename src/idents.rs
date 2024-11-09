@@ -77,4 +77,5 @@ idents! {
     IS_PAIR:    "pair?",
     IS_PROC:    "procedure?",
     IS_STRING:  "string?",
+    IS_SYMBOL:  "symbol?",
 }

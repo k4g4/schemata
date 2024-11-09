@@ -484,6 +484,7 @@ pub enum Is {
     Pair,
     Proc,
     String,
+    Symbol,
 }
 
 impl Is {
@@ -497,6 +498,7 @@ impl Is {
             (Self::Pair, Item::Pair(Some(_))) => true,
             (Self::Proc, Item::Proc(_)) => true,
             (Self::String, Item::String(_)) => true,
+            (Self::Symbol, Item::Sym(_)) => true,
             (Self::List, Item::Pair(pair)) => 'traverse: {
                 let mut pair = pair;
                 while let Some(Pair { tail, .. }) = pair.as_deref() {
@@ -525,6 +527,7 @@ impl fmt::Display for Is {
             Self::Pair => write!(f, "<{}>", idents::IS_PAIR),
             Self::Proc => write!(f, "<{}>", idents::IS_PROC),
             Self::String => write!(f, "<{}>", idents::IS_STRING),
+            Self::Symbol => write!(f, "<{}>", idents::IS_SYMBOL),
         }
     }
 }
