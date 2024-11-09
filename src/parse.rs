@@ -3,6 +3,7 @@ use crate::{
     globals, idents,
     item::{Item, Token},
     scope::Scope,
+    sexpr::SExpr,
     syn::{Defs, Reserved, Syn},
 };
 use anyhow::{anyhow, Result};
@@ -10,7 +11,7 @@ use nom::{
     branch::alt,
     bytes::complete::{tag, take_till1},
     character::complete::{char, multispace0, none_of, not_line_ending, one_of},
-    combinator::{all_consuming, map, map_res, not, recognize, value, verify},
+    combinator::{all_consuming, into, map, map_res, not, recognize, value, verify},
     error::context,
     multi::{many0, many0_count},
     number::complete::double,
@@ -19,7 +20,7 @@ use nom::{
 use std::{borrow::Cow, str};
 
 type I = [u8];
-type ParseRes<'i, O> = nom::IResult<&'i I, O, ParserError<&'i I>>;
+type ParseRes<'src, O> = nom::IResult<&'src I, O, ParserError<&'src I>>;
 
 pub fn repl(prelude: &I, input: &I) -> Result<()> {
     let (debug, pretty) = (globals::debug(), globals::pretty());
@@ -59,7 +60,7 @@ pub fn repl(prelude: &I, input: &I) -> Result<()> {
     Ok(())
 }
 
-fn read<'i, O>(parser: impl FnMut(&'i I) -> ParseRes<O>) -> impl FnOnce(&'i I) -> Result<O> {
+fn read<'src, O>(parser: impl FnMut(&'src I) -> ParseRes<O>) -> impl FnOnce(&'src I) -> Result<O> {
     move |i| match all_consuming(parser)(i) {
         Ok((_, out)) => Ok(out),
         Err(nom::Err::Error(error) | nom::Err::Failure(error)) => Err(anyhow!("{error}")),
@@ -90,6 +91,7 @@ fn syn(i: &I) -> ParseRes<Syn> {
         context("identifier", map(ident, Syn::Ident)),
         context("string", map(string, Syn::String)),
         context("s-expression", map(s_expr, Syn::SExpr)),
+        context("quoted", map(quoted, Syn::Quoted)),
     );
     alt(syns)(i)
 }
@@ -147,8 +149,12 @@ fn string(i: &I) -> ParseRes<Cow<'_, str>> {
     )(i)
 }
 
-fn s_expr(i: &I) -> ParseRes<Vec<Syn>> {
-    delimited(char('('), syns, char(')'))(i)
+fn s_expr(i: &I) -> ParseRes<SExpr> {
+    map(delimited(char('('), syns, char(')')), SExpr::new)(i)
+}
+
+fn quoted(i: &I) -> ParseRes<Box<Syn>> {
+    into(preceded(pair(char('\''), ignore), syn))(i)
 }
 
 #[cfg(test)]
@@ -225,33 +231,82 @@ mod tests {
 
     #[test]
     fn s_exprs() {
-        assert_eq!((EMPTY, vec![]), s_expr(b"()").unwrap());
+        assert_eq!((EMPTY, SExpr::new(vec![])), s_expr(b"()").unwrap());
         assert_eq!(
-            (EMPTY, vec![Syn::Reserved(Reserved::Define)]),
+            (EMPTY, SExpr::new(vec![Syn::Reserved(Reserved::Define)])),
             s_expr(b"(define)").unwrap()
         );
-        assert_eq!((b")" as _, vec![]), s_expr(b"())").unwrap());
+        assert_eq!((b")" as _, SExpr::new(vec![])), s_expr(b"())").unwrap());
         assert!(s_expr(b"))").is_err());
         assert_eq!(
             (
                 EMPTY,
-                vec![Syn::String("foo".into()), Syn::String("bar".into())]
+                SExpr::new(vec![Syn::String("foo".into()), Syn::String("bar".into())])
             ),
             s_expr(br#"("foo" "bar")"#).unwrap()
         );
         assert_eq!(
             (
                 EMPTY,
-                vec![Syn::Num(42.0), Syn::SExpr(vec![Syn::Num(42.0)])]
+                SExpr::new(vec![
+                    Syn::Num(42.0),
+                    Syn::SExpr(SExpr::new(vec![Syn::Num(42.0)]))
+                ])
             ),
             s_expr(b"(42(42))").unwrap()
         );
         assert_eq!(
             (
                 EMPTY,
-                vec![Syn::SExpr(vec![Syn::Num(42.0)]), Syn::SExpr(vec![])]
+                SExpr::new(vec![
+                    Syn::SExpr(SExpr::new(vec![Syn::Num(42.0)])),
+                    Syn::SExpr(SExpr::new(vec![]))
+                ])
             ),
             s_expr(b"((42) (\n) )").unwrap()
+        );
+        assert_eq!(
+            (
+                EMPTY,
+                SExpr::new(vec![
+                    Syn::SExpr(SExpr::new(vec![Syn::Num(43.0)])),
+                    Syn::SExpr(SExpr::new(vec![]))
+                ])
+            ),
+            s_expr(b"( (43);comment\n;; comment! \n   (\n) )").unwrap()
+        );
+    }
+
+    #[test]
+    fn quotes() {
+        assert_eq!(
+            (EMPTY, Box::new(Syn::Ident("foo"))),
+            quoted(b"'foo").unwrap()
+        );
+        assert_eq!(
+            (EMPTY, Box::new(Syn::Ident("foo"))),
+            quoted(b"'  \t ;comment\n foo").unwrap()
+        );
+        assert!(quoted(b"foo").is_err());
+        assert_eq!(
+            (EMPTY, Box::new(Syn::Reserved(Reserved::Define))),
+            quoted(b"'define").unwrap()
+        );
+        assert_eq!(
+            (EMPTY, Box::new(Syn::SExpr(SExpr::new(vec![])))),
+            quoted(b"'()").unwrap()
+        );
+        assert!(quoted(b"()").is_err());
+        assert_eq!(
+            (
+                EMPTY,
+                Box::new(Syn::SExpr(SExpr::new(vec![
+                    Syn::Num(1.0),
+                    Syn::SExpr(SExpr::new(vec![Syn::Num(2.0)])),
+                    Syn::String("3".into())
+                ])))
+            ),
+            quoted(br#"'(1 (2) "3")"#).unwrap()
         );
     }
 }

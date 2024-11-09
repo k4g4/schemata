@@ -5,7 +5,9 @@ mod item;
 mod parse;
 mod proc;
 mod scope;
+mod sexpr;
 mod syn;
+mod utils;
 
 use anyhow::Result;
 use clap::Parser;

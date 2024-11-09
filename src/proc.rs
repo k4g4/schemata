@@ -1,8 +1,9 @@
 use crate::{
     globals, idents,
-    item::{ArgsIter, Item, ItemsIter, NumsIter, Pair, Token},
+    item::{Item, Pair, Token},
     scope::{Scope, ScopeHandle},
     syn::{Defs, Syn},
+    utils::{ArgsIter, ItemsIter, NumsIter},
 };
 use anyhow::{bail, ensure, Context, Result};
 use std::{
@@ -141,7 +142,8 @@ impl<'src> Proc<'src> {
                 }
                 if before_dot_len < params.len() {
                     let &rest_param = params.last().expect("dot is before last param");
-                    let rest = Item::from_items(args.cloned().map(Ok).collect::<Vec<_>>())?;
+                    let rest =
+                        Item::from_items(args.cloned().map(Ok).collect::<Vec<_>>().into_iter())?;
                     if debug {
                         if before_dot_len != 0 {
                             eprint!(", ");
@@ -492,7 +494,7 @@ impl Is {
             (Self::Int, Item::Num(n)) if *n == n.trunc() => true,
             (Self::Number, Item::Num(_)) => true,
             (Self::Null, Item::Pair(None)) => true,
-            (Self::Pair, Item::Pair(_)) => true,
+            (Self::Pair, Item::Pair(Some(_))) => true,
             (Self::Proc, Item::Proc(_)) => true,
             (Self::String, Item::String(_)) => true,
             (Self::List, Item::Pair(pair)) => 'traverse: {

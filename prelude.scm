@@ -55,7 +55,7 @@
 
 (define (list . items) items)
 
-(define nil (list))
+(define nil '())
 
 (define (length list)
     (define (length_ at count)
