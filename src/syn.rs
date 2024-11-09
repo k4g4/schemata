@@ -65,7 +65,7 @@ impl<'src> Syn<'src> {
         match self {
             &Self::Num(n) => Ok(Item::Num(n)),
 
-            Self::String(string) => Ok(Item::String(string.clone())),
+            Self::String(string) => Ok(Item::String(Rc::new(string.clone()))),
 
             Self::Ident(".") => bail!("Improperly placed dot"),
 
@@ -140,6 +140,8 @@ impl<'src> Syn<'src> {
                         idents::IS_PROC => Item::Proc(Proc::Is(Is::Proc)),
                         idents::IS_STRING => Item::Proc(Proc::Is(Is::String)),
                         idents::IS_SYMBOL => Item::Proc(Proc::Is(Is::Symbol)),
+
+                        idents::IS_EQ => Item::Proc(Proc::IsEq),
 
                         _ => {
                             if let [b'c', as_and_ds @ .., b'r'] = ident.as_bytes() {

@@ -9,6 +9,7 @@ use anyhow::{bail, ensure, Context, Result};
 use std::{
     f64, fmt, iter,
     ops::{Add, Div, Mul, Sub},
+    ptr,
     rc::Rc,
     str,
 };
@@ -20,6 +21,7 @@ pub enum Proc<'src> {
     Cmp(Cmp),
     Trig(Trig),
     Is(Is),
+    IsEq,
     Log,
     Exp,
     Rem,
@@ -50,6 +52,27 @@ impl<'src> Proc<'src> {
             Self::Trig(trig) => trig.apply(args.try_into()?),
 
             Self::Is(is) => is.apply(args),
+
+            Self::IsEq => {
+                let ([lhs, rhs], []) = args.get(self)?;
+                let eq = match (lhs, rhs) {
+                    (Item::Num(lhs), Item::Num(rhs)) => lhs == rhs,
+                    (Item::Token(lhs), Item::Token(rhs)) => lhs == rhs,
+                    (Item::Sym(lhs), Item::Sym(rhs)) => lhs == rhs,
+                    (Item::String(lhs), Item::String(rhs)) => Rc::as_ptr(lhs) == Rc::as_ptr(rhs),
+                    (Item::Pair(None), Item::Pair(None)) => true,
+                    (Item::Pair(Some(lhs)), Item::Pair(Some(rhs))) => {
+                        Rc::as_ptr(lhs) == Rc::as_ptr(rhs)
+                    }
+                    (
+                        Item::Proc(Self::Compound { params: lhs, .. }),
+                        Item::Proc(Self::Compound { params: rhs, .. }),
+                    ) => ptr::eq(Rc::as_ptr(lhs), Rc::as_ptr(rhs)),
+                    (Item::Proc(lhs), Item::Proc(rhs)) => format!("{lhs}") == format!("{rhs}"),
+                    _ => false,
+                };
+                Ok(Item::bool(eq))
+            }
 
             Self::Log => {
                 let ([operand], [base]) = NumsIter::try_from(args)?.get(self)?;
@@ -187,6 +210,7 @@ impl fmt::Display for Proc<'_> {
             Self::Cmp(cmp) => write!(f, "{cmp}"),
             Self::Trig(trig) => write!(f, "{trig}"),
             Self::Is(is) => write!(f, "{is}"),
+            Self::IsEq => write!(f, "<{}>", idents::IS_EQ),
             Self::Log => write!(f, "<{}>", idents::LOG),
             Self::Exp => write!(f, "<{}>", idents::EXP),
             Self::Rem => write!(f, "<{}>", idents::REM),

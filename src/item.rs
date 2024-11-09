@@ -9,7 +9,7 @@ use std::{borrow::Cow, f64, fmt, rc::Rc};
 #[derive(Clone, Debug)]
 pub enum Item<'src> {
     Num(f64),
-    String(Cow<'src, str>),
+    String(Rc<Cow<'src, str>>),
     Pair(Option<Rc<Pair<'src>>>),
     Proc(Proc<'src>),
     Token(Token),

@@ -78,4 +78,5 @@ idents! {
     IS_PROC:    "procedure?",
     IS_STRING:  "string?",
     IS_SYMBOL:  "symbol?",
+    IS_EQ:      "eq?",
 }
