@@ -34,6 +34,7 @@ idents! {
     DISP:       "display",
     NEWL:       "newline",
     ERROR:      "error",
+    STR_APP:    "string-append",
 
     ADD:        "+",
     SUB:        "-",

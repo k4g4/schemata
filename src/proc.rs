@@ -5,8 +5,9 @@ use crate::{
     syn::{Defs, Syn},
     utils::{ArgsIter, ItemsIter, NumsIter},
 };
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use std::{
+    borrow::Cow,
     f64, fmt, iter,
     ops::{Add, Div, Mul, Sub},
     ptr,
@@ -35,6 +36,7 @@ pub enum Proc<'src> {
     Display,
     Newline,
     Error,
+    StrApp,
     Compound {
         name: Option<&'src str>,
         params: Rc<[&'src str]>,
@@ -190,6 +192,19 @@ impl<'src> Proc<'src> {
                 bail!(args.map(|arg| format!("{arg} ")).collect::<String>())
             }
 
+            Self::StrApp => args
+                .clone()
+                .try_fold(String::new(), |appended, item| {
+                    if let Item::String(string) = item {
+                        Ok(appended + string)
+                    } else {
+                        Err(anyhow!("Arguments must be strings"))
+                    }
+                })
+                .map(Cow::Owned)
+                .map(Rc::new)
+                .map(Item::String),
+
             Self::Compound {
                 name,
                 params,
@@ -282,6 +297,7 @@ impl fmt::Display for Proc<'_> {
             Self::Display => write!(f, "<{}>", idents::DISP),
             Self::Newline => write!(f, "<{}>", idents::NEWL),
             Self::Error => write!(f, "<{}>", idents::ERROR),
+            Self::StrApp => write!(f, "<{}>", idents::STR_APP),
             Self::Compound { name: None, .. } => write!(f, "<{}>", idents::LAMBDA),
             Self::Compound {
                 name: Some(name), ..

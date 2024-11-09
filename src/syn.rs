@@ -132,6 +132,7 @@ impl<'src> Syn<'src> {
                         idents::DISP => Item::Proc(Proc::Display),
                         idents::NEWL => Item::Proc(Proc::Newline),
                         idents::ERROR => Item::Proc(Proc::Error),
+                        idents::STR_APP => Item::Proc(Proc::StrApp),
 
                         idents::IS_ATOM => Item::Proc(Proc::Is(Is::Atom)),
                         idents::IS_BOOL => Item::Proc(Proc::Is(Is::Bool)),
