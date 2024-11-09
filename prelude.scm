@@ -140,3 +140,9 @@
 (define (max n . ns) (fold (lambda (x y) (if (> x y) x y)) n ns))
 (define (min n . ns) (fold (lambda (x y) (if (< x y) x y)) n ns))
 
+(define (memq item x)
+    (cond
+        ((null? x) false)
+        ((eq? item (car x)) x)
+        (else (memq item (cdr x)))))
+

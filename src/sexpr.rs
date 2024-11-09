@@ -220,11 +220,14 @@ impl<'src> fmt::Display for SExpr<'src> {
             if pretty {
                 writeln!(f)?;
             }
-            for item in &self.0 {
+            for (i, item) in self.0.iter().enumerate() {
                 if pretty {
                     writeln!(f, "{item:#width$}", width = width + 1)?;
                 } else {
-                    write!(f, "{item} ")?;
+                    write!(f, "{item}")?;
+                    if i != self.0.len() - 1 {
+                        write!(f, " ")?;
+                    }
                 }
             }
             utils::indent(f, width)?;

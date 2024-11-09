@@ -145,10 +145,13 @@ impl fmt::Display for Item<'_> {
                         if pretty {
                             writeln!(f, "{head:#width$}", width = width + 1)?;
                         } else {
-                            write!(f, "{head} ")?;
+                            write!(f, "{head}")?;
                         }
                         (head, tail) = match tail {
-                            Self::Pair(Some(pair)) => (&pair.head, &pair.tail),
+                            Self::Pair(Some(pair)) => {
+                                write!(f, " ")?;
+                                (&pair.head, &pair.tail)
+                            }
 
                             Self::Pair(_) => break,
 
