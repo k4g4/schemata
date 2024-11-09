@@ -84,7 +84,7 @@ fn syns(i: &I) -> ParseRes<Vec<Syn>> {
 }
 
 fn syn(i: &I) -> ParseRes<Syn> {
-    let syns = (
+    alt((
         context("reserved", map(reserved, Syn::Reserved)),
         context("number", map(num, Syn::Num)),
         context("token", map(token, Syn::Ident)),
@@ -92,22 +92,21 @@ fn syn(i: &I) -> ParseRes<Syn> {
         context("string", map(string, Syn::String)),
         context("s-expression", map(s_expr, Syn::SExpr)),
         context("quoted", map(quoted, Syn::Quoted)),
-    );
-    alt(syns)(i)
+    ))(i)
 }
 
 fn reserved(i: &I) -> ParseRes<Reserved> {
-    let reserveds = (
+    alt((
         value(Reserved::Define, tag(idents::DEFINE)),
         value(Reserved::Lambda, tag(idents::LAMBDA)),
         value(Reserved::Let, tag(idents::LET)),
+        value(Reserved::Begin, tag(idents::BEGIN)),
         value(Reserved::Cond, tag(idents::COND)),
         value(Reserved::Else, tag(idents::ELSE)),
         value(Reserved::If, tag(idents::IF)),
         value(Reserved::And, tag(idents::AND)),
         value(Reserved::Or, tag(idents::OR)),
-    );
-    alt(reserveds)(i)
+    ))(i)
 }
 
 fn num(i: &I) -> ParseRes<f64> {
@@ -117,8 +116,10 @@ fn num(i: &I) -> ParseRes<f64> {
 }
 
 fn token(i: &I) -> ParseRes<&str> {
-    let tokens = (tag(idents::TRUE), tag(idents::FALSE), tag(idents::VOID));
-    map_res(alt(tokens), str::from_utf8)(i)
+    map_res(
+        alt((tag(idents::TRUE), tag(idents::FALSE), tag(idents::VOID))),
+        str::from_utf8,
+    )(i)
 }
 
 fn ident(i: &I) -> ParseRes<&str> {
@@ -134,10 +135,13 @@ fn ident(i: &I) -> ParseRes<&str> {
 
 fn string(i: &I) -> ParseRes<Cow<'_, str>> {
     let (quote, escaped) = (r#"""#, r#"\""#);
-    let contents = recognize(many0_count(alt((value('"', tag(escaped)), none_of(quote)))));
     map(
         map(
-            delimited(char('"'), contents, char('"')),
+            delimited(
+                char('"'),
+                recognize(many0_count(alt((value('"', tag(escaped)), none_of(quote))))),
+                char('"'),
+            ),
             String::from_utf8_lossy,
         ),
         move |mut s| {

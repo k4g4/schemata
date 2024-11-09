@@ -24,6 +24,7 @@ pub enum Reserved {
     Define,
     Lambda,
     Let,
+    Begin,
     Cond,
     Else,
     If,
@@ -31,18 +32,25 @@ pub enum Reserved {
     Or,
 }
 
+impl Reserved {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Define => idents::DEFINE,
+            Self::Lambda => idents::LAMBDA,
+            Self::Let => idents::LET,
+            Self::Begin => idents::BEGIN,
+            Self::Cond => idents::COND,
+            Self::Else => idents::ELSE,
+            Self::If => idents::IF,
+            Self::And => idents::AND,
+            Self::Or => idents::OR,
+        }
+    }
+}
+
 impl fmt::Display for Reserved {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Define => write!(f, "{}", idents::DEFINE),
-            Self::Lambda => write!(f, "{}", idents::LAMBDA),
-            Self::Let => write!(f, "{}", idents::LET),
-            Self::Cond => write!(f, "{}", idents::COND),
-            Self::Else => write!(f, "{}", idents::ELSE),
-            Self::If => write!(f, "{}", idents::IF),
-            Self::And => write!(f, "{}", idents::AND),
-            Self::Or => write!(f, "{}", idents::OR),
-        }
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -174,16 +182,7 @@ impl<'src> Syn<'src> {
                 ) -> Result<Item<'src>> {
                     match syn {
                         Syn::Ident(ident) => Ok(Item::Sym(ident)),
-                        Syn::Reserved(reserved) => Ok(Item::Sym(match reserved {
-                            Reserved::Define => idents::DEFINE,
-                            Reserved::Lambda => idents::LAMBDA,
-                            Reserved::Let => idents::LET,
-                            Reserved::Cond => idents::COND,
-                            Reserved::Else => idents::ELSE,
-                            Reserved::If => idents::IF,
-                            Reserved::And => idents::AND,
-                            Reserved::Or => idents::OR,
-                        })),
+                        Syn::Reserved(reserved) => Ok(Item::Sym(reserved.as_str())),
                         Syn::SExpr(sexpr) => Ok(Item::from_items(
                             sexpr.iter().map(|syn| eval_quoted(syn, scope)),
                         )?),

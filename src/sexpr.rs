@@ -39,16 +39,8 @@ impl<'src> SExpr<'src> {
                 }
             }
 
-            [Syn::Reserved(Reserved::Define), ..] => {
-                bail!("Malformed '{}'", idents::DEFINE)
-            }
-
             [Syn::Reserved(Reserved::Lambda), Syn::SExpr(params), body @ ..] => {
                 Self::create_proc(scope, None, &params.0, body)
-            }
-
-            [Syn::Reserved(Reserved::Lambda), ..] => {
-                bail!("Malformed '{}'", idents::LAMBDA)
             }
 
             [Syn::Reserved(Reserved::Let), Syn::SExpr(mappings), body @ ..] => {
@@ -90,9 +82,9 @@ impl<'src> SExpr<'src> {
                 lambda.apply()
             }
 
-            [Syn::Reserved(Reserved::Let), ..] => {
-                bail!("Malformed '{}'", idents::LET)
-            }
+            [Syn::Reserved(Reserved::Begin), syn, syns @ ..] => syns
+                .iter()
+                .try_fold(syn.eval(scope, defs)?, |_, syn| syn.eval(scope, defs)),
 
             [Syn::Reserved(Reserved::Cond), conds @ ..] if !conds.is_empty() => {
                 for (i, cond) in conds.iter().enumerate() {
@@ -133,8 +125,6 @@ impl<'src> SExpr<'src> {
                 bail!("All conditions are '{}'", idents::FALSE);
             }
 
-            [Syn::Reserved(Reserved::Cond), ..] => bail!("Malformed '{}'", idents::COND),
-
             [Syn::Reserved(Reserved::If), syns @ ..] => {
                 ensure!(matches!(syns.len(), 2 | 3), "Malformed '{}'", idents::IF);
                 let cond = syns[0].eval(scope, Defs::NotAllowed)?.apply()?;
@@ -163,6 +153,8 @@ impl<'src> SExpr<'src> {
                     })
                     .map(|(_, item)| item)
             }
+
+            [Syn::Reserved(reserved), ..] => bail!("Malformed '{}'", reserved.as_str()),
 
             _ => Item::from_items(self.0.iter().map(|syn| syn.eval(scope, Defs::NotAllowed)))
                 .and_then(Item::apply),

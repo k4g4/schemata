@@ -8,6 +8,7 @@ idents! {
     DEFINE:     "define",
     LAMBDA:     "lambda",
     LET:        "let",
+    BEGIN:      "begin",
     COND:       "cond",
     ELSE:       "else",
     IF:         "if",
