@@ -2,7 +2,7 @@ use crate::{
     error::ParserError,
     globals, idents,
     item::{Item, Token},
-    scope::Scope,
+    memory::{Heap, ScopeHandle},
     sexpr::SExpr,
     syn::{Defs, Reserved, Syn},
 };
@@ -24,13 +24,14 @@ type ParseRes<'src, O> = nom::IResult<&'src I, O, ParserError<&'src I>>;
 
 pub fn repl(prelude: &I, input: &I) -> Result<()> {
     let (debug, pretty) = (globals::debug(), globals::pretty());
-    let scope = Scope::new_global();
+    let heap = Heap::default();
+    let scope = ScopeHandle::new_global(&heap);
 
     let prelude_syns = read(syns)(prelude)?;
     let input_syns = read(syns)(input)?;
 
     for syn in &prelude_syns {
-        syn.eval(&scope, Defs::Allowed)?;
+        syn.eval(scope, Defs::Allowed)?;
     }
 
     for syn in &input_syns {
@@ -43,7 +44,7 @@ pub fn repl(prelude: &I, input: &I) -> Result<()> {
             }
         }
 
-        let item = syn.eval(&scope, Defs::Allowed)?;
+        let item = syn.eval(scope, Defs::Allowed)?;
 
         if debug {
             println!("Evaluated:");

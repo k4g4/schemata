@@ -1,8 +1,8 @@
 use crate::{
     idents,
     item::Item,
+    memory::ScopeHandle,
     proc::{Arith, Cmp, Cxr, Is, ListManip, Proc, Trig},
-    scope::Scope,
     sexpr::SExpr,
     utils,
 };
@@ -61,7 +61,9 @@ pub enum Defs {
 }
 
 impl<'src> Syn<'src> {
-    pub fn eval(&self, scope: &Rc<Scope<'src>>, defs: Defs) -> Result<Item<'src>> {
+    pub fn eval(&self, scope: ScopeHandle<'src>, defs: Defs) -> Result<Item<'src>> {
+        scope.collect_garbage()?;
+
         match self {
             &Self::Num(n) => Ok(Item::Num(n)),
 
@@ -186,7 +188,7 @@ impl<'src> Syn<'src> {
             Self::Quoted(quoted) => {
                 fn eval_quoted<'a, 'src>(
                     syn: &'a Syn<'src>,
-                    scope: &Rc<Scope<'src>>,
+                    scope: ScopeHandle<'src>,
                 ) -> Result<Item<'src>> {
                     match syn {
                         Syn::Ident(ident) => Ok(Item::Sym(ident)),

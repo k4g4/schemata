@@ -2,7 +2,6 @@ use crate::{
     globals, idents,
     item::{Item, Pair, Token},
     memory::ScopeHandle,
-    scope::Scope,
     syn::{Defs, Syn},
     utils::{ArgsIter, ItemsIter, NumsIter},
 };
@@ -33,7 +32,7 @@ pub enum Proc<'src> {
     Floor,
     Ceil,
     Apply,
-    Eval(Rc<Scope<'src>>),
+    Eval(ScopeHandle<'src>),
     Display,
     Newline,
     Error,
@@ -41,7 +40,7 @@ pub enum Proc<'src> {
     Compound {
         name: Option<&'src str>,
         params: Rc<[&'src str]>,
-        scope_handle: ScopeHandle<'src>,
+        scope: ScopeHandle<'src>,
         body: Rc<[Syn<'src>]>,
     },
 }
@@ -166,7 +165,7 @@ impl<'src> Proc<'src> {
                 invoke.apply()
             }
 
-            Self::Eval(scope) => {
+            &Self::Eval(scope) => {
                 let ([item], []) = args.get(self)?;
                 let syn = item.into_syn()?;
                 syn.eval(scope, Defs::Allowed)
@@ -209,7 +208,7 @@ impl<'src> Proc<'src> {
             Self::Compound {
                 name,
                 params,
-                scope_handle: scope,
+                scope,
                 body,
             } => {
                 let debug = globals::debug();
@@ -217,7 +216,7 @@ impl<'src> Proc<'src> {
                 if debug {
                     eprint!("{}(", name.unwrap_or(idents::LAMBDA));
                 }
-                let scope = Scope::new_local(todo!())?; //scope)?;
+                let scope = scope.new_local();
                 let mut args = args;
                 let before_dot_len = params
                     .iter()
@@ -263,7 +262,7 @@ impl<'src> Proc<'src> {
                 let mut item = Item::nil();
                 for syn in body.iter() {
                     item = syn
-                        .eval(&scope, Defs::Allowed)
+                        .eval(scope, Defs::Allowed)
                         .with_context(|| format!("[while evaluating {self}]"))?;
                 }
                 if matches!(item, Item::Defined) {

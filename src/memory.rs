@@ -109,7 +109,7 @@ impl<'src> ScopeHandle<'src> {
             let Some(scope) = heap_ref.get(&id) else {
                 bail!("Failed to find scope for {id:?}");
             };
-            let handles = scope.defs.values().flat_map(Item::get_handle);
+            let handles = scope.defs.values().flat_map(Item::scope);
             for handle in handles {
                 get_reachable_ids(heap, handle.id, reachable)?;
             }

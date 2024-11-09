@@ -5,7 +5,6 @@ mod item;
 mod memory;
 mod parse;
 mod proc;
-mod scope;
 mod sexpr;
 mod syn;
 mod utils;

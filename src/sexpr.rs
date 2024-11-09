@@ -1,13 +1,13 @@
 use crate::{
     idents,
     item::Item,
+    memory::ScopeHandle,
     proc::Proc,
-    scope::Scope,
     syn::{Defs, Reserved, Syn},
     utils,
 };
 use anyhow::{bail, ensure, Result};
-use std::{fmt, rc::Rc};
+use std::fmt;
 
 #[derive(PartialEq, Clone, Debug)]
 pub struct SExpr<'src>(Vec<Syn<'src>>);
@@ -17,7 +17,7 @@ impl<'src> SExpr<'src> {
         Self(syns)
     }
 
-    pub fn eval(&self, scope: &Rc<Scope<'src>>, defs: Defs) -> Result<Item<'src>> {
+    pub fn eval(&self, scope: ScopeHandle<'src>, defs: Defs) -> Result<Item<'src>> {
         match self.0.as_slice() {
             [] => Ok(Item::nil()),
 
@@ -71,7 +71,7 @@ impl<'src> SExpr<'src> {
                     let proc = Item::Proc(Proc::Compound {
                         name: None,
                         params,
-                        scope_handle: todo!(), //scope.get_handle(),
+                        scope, //scope.get_handle(),
                         body: body.into(),
                     });
                     let mut items = Vec::with_capacity(defs.len() + 1);
@@ -166,7 +166,7 @@ impl<'src> SExpr<'src> {
     }
 
     fn create_proc(
-        scope: &Rc<Scope<'src>>,
+        scope: ScopeHandle<'src>,
         name: Option<&'src str>,
         params: &[Syn<'src>],
         body: &[Syn<'src>],
@@ -202,7 +202,7 @@ impl<'src> SExpr<'src> {
         Ok(Item::Proc(Proc::Compound {
             name,
             params,
-            scope_handle: todo!(), //scope.get_handle(),
+            scope,
             body: body.into(),
         }))
     }

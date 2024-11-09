@@ -77,9 +77,9 @@ impl<'src> Item<'src> {
         })
     }
 
-    pub fn get_handle(&self) -> Option<ScopeHandle<'src>> {
-        if let &Self::Proc(Proc::Compound { scope_handle, .. }) = self {
-            Some(scope_handle)
+    pub fn scope(&self) -> Option<ScopeHandle<'src>> {
+        if let &Self::Proc(Proc::Compound { scope, .. }) = self {
+            Some(scope)
         } else {
             None
         }
