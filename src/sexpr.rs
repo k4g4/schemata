@@ -71,7 +71,7 @@ impl<'src> SExpr<'src> {
                     let proc = Item::Proc(Proc::Compound {
                         name: None,
                         params,
-                        scope_handle: scope.get_handle(),
+                        scope_handle: todo!(), //scope.get_handle(),
                         body: body.into(),
                     });
                     let mut items = Vec::with_capacity(defs.len() + 1);
@@ -202,7 +202,7 @@ impl<'src> SExpr<'src> {
         Ok(Item::Proc(Proc::Compound {
             name,
             params,
-            scope_handle: scope.get_handle(),
+            scope_handle: todo!(), //scope.get_handle(),
             body: body.into(),
         }))
     }

@@ -62,12 +62,12 @@ impl<'src> Scope<'src> {
                     ..
                 }) = &mut item
                 {
-                    if let ScopeHandle::Weak(weak_scope) = scope {
-                        let strong_scope = weak_scope
-                            .upgrade()
-                            .ok_or_else(|| anyhow!("failed to upgrade scope handle"))?;
-                        *scope = ScopeHandle::Strong(self.id, strong_scope);
-                    }
+                    // if let ScopeHandle::Weak(weak_scope) = scope {
+                    //     let strong_scope = weak_scope
+                    //         .upgrade()
+                    //         .ok_or_else(|| anyhow!("failed to upgrade scope handle"))?;
+                    //     *scope = ScopeHandle::Strong(self.id, strong_scope);
+                    // }
                 }
                 Ok(item)
             })
@@ -86,11 +86,11 @@ impl<'src> Scope<'src> {
             ..
         }) = &mut item
         {
-            if let ScopeHandle::Strong(id, strong_scope) = scope {
-                if *id == self.id {
-                    *scope = ScopeHandle::Weak(Rc::downgrade(strong_scope));
-                }
-            }
+            // if let ScopeHandle::Strong(id, strong_scope) = scope {
+            //     if *id == self.id {
+            //         *scope = ScopeHandle::Weak(Rc::downgrade(strong_scope));
+            //     }
+            // }
         }
         // Global scope allows renaming variables, local scopes do not
         if self.defs.borrow_mut().insert(ident, item).is_some() && self.parent.is_some() {

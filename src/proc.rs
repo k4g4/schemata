@@ -1,7 +1,8 @@
 use crate::{
     globals, idents,
     item::{Item, Pair, Token},
-    scope::{Scope, ScopeHandle},
+    memory::ScopeHandle,
+    scope::Scope,
     syn::{Defs, Syn},
     utils::{ArgsIter, ItemsIter, NumsIter},
 };
@@ -216,7 +217,7 @@ impl<'src> Proc<'src> {
                 if debug {
                     eprint!("{}(", name.unwrap_or(idents::LAMBDA));
                 }
-                let scope = Scope::new_local(scope)?;
+                let scope = Scope::new_local(todo!())?; //scope)?;
                 let mut args = args;
                 let before_dot_len = params
                     .iter()
@@ -337,7 +338,7 @@ impl ListManip {
                     Item::Pair(_) => bail!("Cannot dereference an empty list"),
                     _ => bail!("Cannot dereference '{item}'"),
                 })
-                .map(Clone::clone)
+                .cloned()
         }
 
         macro_rules! cxr_impl {

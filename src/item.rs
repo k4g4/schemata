@@ -1,5 +1,7 @@
 use crate::{
-    idents, parse,
+    idents,
+    memory::ScopeHandle,
+    parse,
     proc::Proc,
     sexpr::SExpr,
     syn::Syn,
@@ -73,6 +75,14 @@ impl<'src> Item<'src> {
         } else {
             None
         })
+    }
+
+    pub fn get_handle(&self) -> Option<ScopeHandle<'src>> {
+        if let &Self::Proc(Proc::Compound { scope_handle, .. }) = self {
+            Some(scope_handle)
+        } else {
+            None
+        }
     }
 
     pub fn into_syn(&self) -> Result<Syn<'src>> {
