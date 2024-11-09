@@ -40,6 +40,14 @@
 (define (abs n)
     (if (< n 0) (- n) n))
 
+(define (quotient dividend divisor)
+    (if (and (integer? dividend) (integer? divisor))
+        (truncate (/ dividend divisor))
+        (error "Arguments must be integers")))
+
+(define (log10 operand) (log operand 10))
+(define (log2 operand) (log operand 2))
+
 (define (fib n)
     (define (fib_ a b i)
         (if (= i n)
