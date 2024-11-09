@@ -1,3 +1,6 @@
+(define true #t)
+(define false #f)
+
 (define (not expr)
     (cond
         (expr #f)
@@ -48,6 +51,27 @@
 
 (define (compose f g) (lambda (x) (f (g x))))
 
+(define (curry2 f)
+    (lambda (x1)
+        (lambda (x2) (f x1 x2))))
+(define (curry3 f)
+    (lambda (x1)
+        (lambda (x2)
+            (lambda (x3) (f x1 x2 x3)))))
+(define (curry4 f)
+    (lambda (x1)
+        (lambda (x2)
+            (lambda (x3)
+                (lambda (x4) (f x1 x2 x3 x4))))))
+(define (curry5 f)
+    (lambda (x1)
+        (lambda (x2)
+            (lambda (x3)
+                (lambda (x4)
+                    (lambda (x5) (f x1 x2 x3 x4 x5)))))))
+
+(define (flip f) (lambda (x y) (f y x)))
+
 (define (gcd a b)
     (if (= b 0)
         a
@@ -80,11 +104,11 @@
                 rest))))
 
 (define (reduce combiner list)
-    (if (null? (cdr list))
-        (car list)
-        (combiner
-            (car list)
-            (reduce combiner (cdr list)))))
+    (define (reduce_ res rem)
+        (if (null? rem)
+            res
+            (reduce_ (combiner res (car rem)) (cdr rem))))
+    (reduce_ (car list) (cdr list)))
 
 (define (fold combiner init list)
     (if (null? list)
@@ -137,8 +161,10 @@
             (cons (car list) (append2 acc (cdr list)))))
     (fold append2 nil lists))
 
-(define (max n . ns) (fold (lambda (x y) (if (> x y) x y)) n ns))
-(define (min n . ns) (fold (lambda (x y) (if (< x y) x y)) n ns))
+(define (max n . ns)
+    (fold (lambda (x y) (if (> x y) x y)) n ns))
+(define (min n . ns)
+    (fold (lambda (x y) (if (< x y) x y)) n ns))
 
 (define (memq item x)
     (cond
@@ -146,3 +172,19 @@
         ((eq? item (car x)) x)
         (else (memq item (cdr x)))))
 
+(define (displayln item)
+    (display item)
+    (newline))
+
+(define (print . items)
+    (for-each
+        (lambda (item)
+            (if (string? item)
+                (begin
+                    (display "\"")
+                    (display item)
+                    (display "\""))
+                (display item))
+            (display " "))
+        items)
+    (newline))

@@ -43,6 +43,7 @@ idents! {
     LOG:        "log",
     EXP:        "exp",
     REM:        "remainder",
+    MOD:        "modulo",
     TRUNC:      "truncate",
     FLOOR:      "floor",
     CEIL:       "ceiling",
@@ -70,6 +71,7 @@ idents! {
     LT:         "<",
     LE:         "<=",
 
+    IS_ATOM:    "atom?",
     IS_BOOL:    "boolean?",
     IS_INT:     "integer?",
     IS_LIST:    "list?",
@@ -80,4 +82,5 @@ idents! {
     IS_STRING:  "string?",
     IS_SYMBOL:  "symbol?",
     IS_EQ:      "eq?",
+    IS_EQUAL:   "equal?",
 }

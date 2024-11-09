@@ -111,6 +111,7 @@ impl<'src> Syn<'src> {
                         idents::LOG => Item::Proc(Proc::Log),
                         idents::EXP => Item::Proc(Proc::Exp),
                         idents::REM => Item::Proc(Proc::Rem),
+                        idents::MOD => Item::Proc(Proc::Mod),
                         idents::TRUNC => Item::Proc(Proc::Trunc),
                         idents::FLOOR => Item::Proc(Proc::Floor),
                         idents::CEIL => Item::Proc(Proc::Ceil),
@@ -132,6 +133,7 @@ impl<'src> Syn<'src> {
                         idents::NEWL => Item::Proc(Proc::Newline),
                         idents::ERROR => Item::Proc(Proc::Error),
 
+                        idents::IS_ATOM => Item::Proc(Proc::Is(Is::Atom)),
                         idents::IS_BOOL => Item::Proc(Proc::Is(Is::Bool)),
                         idents::IS_INT => Item::Proc(Proc::Is(Is::Int)),
                         idents::IS_LIST => Item::Proc(Proc::Is(Is::List)),
@@ -143,6 +145,7 @@ impl<'src> Syn<'src> {
                         idents::IS_SYMBOL => Item::Proc(Proc::Is(Is::Symbol)),
 
                         idents::IS_EQ => Item::Proc(Proc::IsEq),
+                        idents::IS_EQUAL => Item::Proc(Proc::IsEqual),
 
                         _ => {
                             if let [b'c', as_and_ds @ .., b'r'] = ident.as_bytes() {

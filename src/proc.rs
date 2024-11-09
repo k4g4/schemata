@@ -22,9 +22,11 @@ pub enum Proc<'src> {
     Trig(Trig),
     Is(Is),
     IsEq,
+    IsEqual,
     Log,
     Exp,
     Rem,
+    Mod,
     Trunc,
     Floor,
     Ceil,
@@ -75,6 +77,49 @@ impl<'src> Proc<'src> {
                 Ok(Item::bool(eq))
             }
 
+            Self::IsEqual => {
+                let ([lhs, rhs], []) = args.get(self)?;
+                match (lhs, rhs) {
+                    (Item::Num(_), Item::Num(_))
+                    | (Item::Token(_), Item::Token(_))
+                    | (Item::Sym(_), Item::Sym(_))
+                    | (Item::Proc(_), Item::Proc(_)) => Self::IsEq.apply(args),
+                    (Item::String(lhs), Item::String(rhs)) => Ok(Item::bool(lhs == rhs)),
+                    (Item::Pair(None), Item::Pair(None)) => Ok(Item::bool(true)),
+                    (Item::Pair(Some(lhs)), Item::Pair(Some(rhs))) => {
+                        let (
+                            Pair {
+                                head: lhs_head,
+                                tail: lhs_tail,
+                            },
+                            Pair {
+                                head: rhs_head,
+                                tail: rhs_tail,
+                            },
+                        ) = (lhs.as_ref(), rhs.as_ref());
+
+                        let heads = Pair {
+                            head: lhs_head.clone(),
+                            tail: Item::cons(rhs_head.clone(), Item::nil()),
+                        };
+                        if !self.apply(ItemsIter::new(Some(&heads)))?.is_truthy() {
+                            Ok(Item::bool(false))
+                        } else {
+                            let tails = Pair {
+                                head: lhs_tail.clone(),
+                                tail: Item::cons(rhs_tail.clone(), Item::nil()),
+                            };
+                            if !self.apply(ItemsIter::new(Some(&tails)))?.is_truthy() {
+                                Ok(Item::bool(false))
+                            } else {
+                                Ok(Item::bool(true))
+                            }
+                        }
+                    }
+                    _ => Ok(Item::bool(false)),
+                }
+            }
+
             Self::Log => {
                 let ([operand], [base]) = NumsIter::try_from(args)?.get(self)?;
                 let base = base.unwrap_or(f64::consts::E);
@@ -89,6 +134,12 @@ impl<'src> Proc<'src> {
             Self::Rem => {
                 let ([dividend, divisor], []) = NumsIter::try_from(args)?.get(self)?;
                 Ok(Item::Num(dividend % divisor))
+            }
+
+            Self::Mod => {
+                let ([dividend, divisor], []) = NumsIter::try_from(args)?.get(self)?;
+
+                Ok(Item::Num(dividend.rem_euclid(divisor)))
             }
 
             Self::Trunc => {
@@ -218,9 +269,11 @@ impl fmt::Display for Proc<'_> {
             Self::Trig(trig) => write!(f, "{trig}"),
             Self::Is(is) => write!(f, "{is}"),
             Self::IsEq => write!(f, "<{}>", idents::IS_EQ),
+            Self::IsEqual => write!(f, "<{}>", idents::IS_EQUAL),
             Self::Log => write!(f, "<{}>", idents::LOG),
             Self::Exp => write!(f, "<{}>", idents::EXP),
             Self::Rem => write!(f, "<{}>", idents::REM),
+            Self::Mod => write!(f, "<{}>", idents::MOD),
             Self::Trunc => write!(f, "<{}>", idents::TRUNC),
             Self::Floor => write!(f, "<{}>", idents::FLOOR),
             Self::Ceil => write!(f, "<{}>", idents::CEIL),
@@ -508,6 +561,7 @@ impl fmt::Display for Trig {
 
 #[derive(Copy, Clone, Debug)]
 pub enum Is {
+    Atom,
     Bool,
     Int,
     List,
@@ -523,6 +577,15 @@ impl Is {
     fn apply<'src>(self, args: ItemsIter<'_, 'src>) -> Result<Item<'src>> {
         let ([item], []) = args.get(self)?;
         let is = match (self, item) {
+            (
+                Self::Atom,
+                Item::Token(Token::True)
+                | Item::Token(Token::False)
+                | Item::Num(_)
+                | Item::Sym(_)
+                | Item::String(_)
+                | Item::Pair(None),
+            ) => true,
             (Self::Bool, Item::Token(Token::True) | Item::Token(Token::False)) => true,
             (Self::Int, Item::Num(n)) if *n == n.trunc() => true,
             (Self::Number, Item::Num(_)) => true,
@@ -551,6 +614,7 @@ impl Is {
 impl fmt::Display for Is {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Atom => write!(f, "<{}>", idents::IS_ATOM),
             Self::Bool => write!(f, "<{}>", idents::IS_BOOL),
             Self::Int => write!(f, "<{}>", idents::IS_INT),
             Self::List => write!(f, "<{}>", idents::IS_LIST),

@@ -127,7 +127,7 @@ impl<'src> SExpr<'src> {
 
             [Syn::Reserved(Reserved::If), syns @ ..] => {
                 ensure!(matches!(syns.len(), 2 | 3), "Malformed '{}'", idents::IF);
-                let cond = syns[0].eval(scope, Defs::NotAllowed)?.apply()?;
+                let cond = syns[0].eval(scope, Defs::NotAllowed)?;
                 if cond.is_truthy() {
                     syns[1].eval(scope, Defs::NotAllowed)
                 } else if let Some(alt) = syns.get(2) {
