@@ -68,7 +68,7 @@ fn read<'i, O>(parser: impl FnMut(&'i I) -> ParseRes<O>) -> impl FnOnce(&'i I) -
 }
 
 fn comment(i: &I) -> ParseRes<&I> {
-    preceded(tag(";;"), not_line_ending)(i)
+    preceded(char(';'), not_line_ending)(i)
 }
 
 fn ignore(i: &I) -> ParseRes<()> {

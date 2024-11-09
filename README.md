@@ -2,6 +2,6 @@
 
 A scheme interpreter in rust.
 (Mostly) fully featured with some basic garbage collection.
-Memory may still leak in certain situations.
+Memory currently leaks when creating closures.
 
 Supports nearly all scheme builtin procedures and macros.

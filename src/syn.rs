@@ -292,25 +292,22 @@ impl<'src> Syn<'src> {
                                     }
 
                                     [Self::Reserved(Reserved::Else), syn, syns @ ..] => {
-                                        return if i == conds.len() - 1 {
-                                            let mut item = syn.eval(scope, Defs::NotAllowed)?;
-                                            for syn in syns {
-                                                item = syn.eval(scope, Defs::NotAllowed)?;
-                                            }
-                                            item.apply()
+                                        if i == conds.len() - 1 {
+                                            return syns.iter().try_fold(
+                                                syn.eval(scope, Defs::NotAllowed)?,
+                                                |_, syn| syn.eval(scope, Defs::NotAllowed),
+                                            );
                                         } else {
                                             bail!("Ill-placed '{}'", idents::ELSE);
                                         };
                                     }
 
                                     [cond, syns @ ..] => {
-                                        let mut item =
-                                            cond.eval(scope, Defs::NotAllowed)?.apply()?;
+                                        let item = cond.eval(scope, Defs::NotAllowed)?;
                                         if item.is_truthy() {
-                                            for syn in syns {
-                                                item = syn.eval(scope, Defs::NotAllowed)?;
-                                            }
-                                            return item.apply();
+                                            return syns.iter().try_fold(item, |_, syn| {
+                                                syn.eval(scope, Defs::NotAllowed)
+                                            });
                                         }
                                     }
                                 }

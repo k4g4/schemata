@@ -39,10 +39,10 @@
 
 (define (fib n)
     (define (fib_ a b i)
-        (if (= i 1)
+        (if (= i n)
             a
-            (fib_ b (+ a b) (- i 1))))
-    (fib_ 0 1 n))
+            (fib_ b (+ a b) (+ i 1))))
+    (fib_ 0 1 0))
 
 (define (identity x) x)
 
@@ -86,6 +86,13 @@
             (car list)
             (reduce combiner (cdr list)))))
 
+(define (fold combiner init list)
+    (if (null? list)
+        init
+        (combiner
+            (fold combiner init (cdr list))
+            (car list))))
+
 (define (reverse l)
     (define (reverse_ res rem)
         (if (null? rem)
@@ -102,3 +109,34 @@
 
 (define (all pred list)
     (not (any (compose not pred) list)))
+
+(define (for-each proc list)
+    (if (not (null? list))
+        (let ()
+            (proc (car list))
+            (for-each proc (cdr list)))))
+
+(define (count-leaves tree)
+    (cond
+        ((null? tree) 0)
+        ((not (pair? tree)) 1)
+        (else
+            (+
+                (count-leaves (car tree))
+                (count-leaves (cdr tree))))))
+
+(define (range from to step)
+    (if ((if (> step 0) >= <=) from to)
+        nil
+        (cons from (range (+ from step) to step))))
+
+(define (append . lists)
+    (define (append2 acc list)
+        (if (null? list)
+            acc
+            (cons (car list) (append2 acc (cdr list)))))
+    (fold append2 nil lists))
+
+(define (max n . ns) (fold (lambda (x y) (if (> x y) x y)) n ns))
+(define (min n . ns) (fold (lambda (x y) (if (< x y) x y)) n ns))
+
