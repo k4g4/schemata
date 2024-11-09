@@ -1,5 +1,6 @@
 mod error;
 mod globals;
+mod heap;
 mod idents;
 mod item;
 mod parse;
