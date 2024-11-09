@@ -17,7 +17,7 @@ impl<'src> SExpr<'src> {
         Self(syns)
     }
 
-    pub fn eval(&'src self, scope: &Rc<Scope<'src>>, defs: Defs) -> Result<Item<'src>> {
+    pub fn eval(&self, scope: &Rc<Scope<'src>>, defs: Defs) -> Result<Item<'src>> {
         match self.0.as_slice() {
             [] => Ok(Item::nil()),
 
@@ -49,8 +49,8 @@ impl<'src> SExpr<'src> {
                     .0
                     .iter()
                     .map(|mapping| {
-                        if let Syn::SExpr(sexpr) = mapping {
-                            if let &[Syn::Ident(param), _] = sexpr.0.as_slice() {
+                        if let Syn::SExpr(s_expr) = mapping {
+                            if let &[Syn::Ident(param), _] = s_expr.0.as_slice() {
                                 Ok(param)
                             } else {
                                 bail!("Malformed '{}'", idents::LET);
@@ -61,8 +61,8 @@ impl<'src> SExpr<'src> {
                     })
                     .collect::<Result<_>>()?;
                 let defs = mappings.0.iter().map(|mapping| {
-                    if let Syn::SExpr(group) = mapping {
-                        &group.0[1]
+                    if let Syn::SExpr(s_expr) = mapping {
+                        &s_expr.0[1]
                     } else {
                         unreachable!("already checked")
                     }
@@ -72,7 +72,7 @@ impl<'src> SExpr<'src> {
                         name: None,
                         params,
                         scope_handle: scope.get_handle(),
-                        body,
+                        body: body.into(),
                     });
                     let mut items = Vec::with_capacity(defs.len() + 1);
                     items.push(Ok(proc));
@@ -88,8 +88,8 @@ impl<'src> SExpr<'src> {
 
             [Syn::Reserved(Reserved::Cond), conds @ ..] if !conds.is_empty() => {
                 for (i, cond) in conds.iter().enumerate() {
-                    if let Syn::SExpr(group) = cond {
-                        match group.0.as_slice() {
+                    if let Syn::SExpr(s_expr) = cond {
+                        match s_expr.0.as_slice() {
                             [] => bail!("Malformed '{}'", idents::COND),
 
                             [Syn::Reserved(Reserved::Else)] => {
@@ -161,7 +161,7 @@ impl<'src> SExpr<'src> {
         }
     }
 
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Syn> {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Syn<'src>> {
         self.0.iter()
     }
 
@@ -169,7 +169,7 @@ impl<'src> SExpr<'src> {
         scope: &Rc<Scope<'src>>,
         name: Option<&'src str>,
         params: &[Syn<'src>],
-        body: &'src [Syn<'src>],
+        body: &[Syn<'src>],
     ) -> Result<Item<'src>> {
         ensure!(!body.is_empty(), "Empty '{}' body", idents::DEFINE);
         if let Some(Syn::Ident(duplicate)) = params
@@ -203,7 +203,7 @@ impl<'src> SExpr<'src> {
             name,
             params,
             scope_handle: scope.get_handle(),
-            body,
+            body: body.into(),
         }))
     }
 }

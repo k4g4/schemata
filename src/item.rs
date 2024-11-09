@@ -1,9 +1,11 @@
 use crate::{
-    idents,
+    idents, parse,
     proc::Proc,
+    sexpr::SExpr,
+    syn::Syn,
     utils::{self, ItemsIter},
 };
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use std::{borrow::Cow, f64, fmt, rc::Rc};
 
 #[derive(Clone, Debug)]
@@ -71,6 +73,30 @@ impl<'src> Item<'src> {
         } else {
             None
         })
+    }
+
+    pub fn into_syn(&self) -> Result<Syn<'src>> {
+        match self {
+            &Self::Num(num) => Ok(Syn::Num(num)),
+            Self::String(string) => Ok(Syn::String(string.as_ref().clone())),
+            Self::Token(Token::True) => Ok(Syn::Ident(idents::TRUE)),
+            Self::Token(Token::False) => Ok(Syn::Ident(idents::FALSE)),
+            Self::Token(Token::Void) => Ok(Syn::Ident(idents::VOID)),
+            Self::Sym(sym) => {
+                if let Ok((b"", reserved)) = parse::reserved(sym.as_bytes()) {
+                    Ok(Syn::Reserved(reserved))
+                } else {
+                    Ok(Syn::Ident(sym))
+                }
+            }
+            Self::Proc(_) | Self::Defined => Err(anyhow!("Unable to reflect on '{self}'")),
+            Self::Pair(pair) => {
+                let syns = ItemsIter::new(pair.as_deref())
+                    .map(Self::into_syn)
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(Syn::SExpr(SExpr::new(syns)))
+            }
+        }
     }
 
     pub fn apply(self) -> Result<Self> {

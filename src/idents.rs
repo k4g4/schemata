@@ -16,6 +16,7 @@ idents! {
     OR:         "or",
 
     APPLY:      "apply",
+    EVAL:       "eval",
     EXIT:       "exit",
 
     CONS:       "cons",

@@ -29,6 +29,7 @@ pub enum Proc<'src> {
     Floor,
     Ceil,
     Apply,
+    Eval(Rc<Scope<'src>>),
     Display,
     Newline,
     Error,
@@ -36,7 +37,7 @@ pub enum Proc<'src> {
         name: Option<&'src str>,
         params: Rc<[&'src str]>,
         scope_handle: ScopeHandle<'src>,
-        body: &'src [Syn<'src>],
+        body: Rc<[Syn<'src>]>,
     },
 }
 
@@ -109,6 +110,12 @@ impl<'src> Proc<'src> {
                 let ([proc, args], []) = args.get(self)?;
                 let invoke = Item::cons(proc.clone(), args.clone());
                 invoke.apply()
+            }
+
+            Self::Eval(scope) => {
+                let ([item], []) = args.get(self)?;
+                let syn = item.into_syn()?;
+                syn.eval(scope, Defs::Allowed)
             }
 
             Self::Display => {
@@ -187,7 +194,7 @@ impl<'src> Proc<'src> {
                 }
 
                 let mut item = Item::nil();
-                for syn in *body {
+                for syn in body.iter() {
                     item = syn
                         .eval(&scope, Defs::Allowed)
                         .with_context(|| format!("[while evaluating {self}]"))?;
@@ -218,6 +225,7 @@ impl fmt::Display for Proc<'_> {
             Self::Floor => write!(f, "<{}>", idents::FLOOR),
             Self::Ceil => write!(f, "<{}>", idents::CEIL),
             Self::Apply => write!(f, "<{}>", idents::APPLY),
+            Self::Eval(_) => write!(f, "<{}>", idents::EVAL),
             Self::Display => write!(f, "<{}>", idents::DISP),
             Self::Newline => write!(f, "<{}>", idents::NEWL),
             Self::Error => write!(f, "<{}>", idents::ERROR),

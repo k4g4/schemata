@@ -95,7 +95,7 @@ fn syn(i: &I) -> ParseRes<Syn> {
     ))(i)
 }
 
-fn reserved(i: &I) -> ParseRes<Reserved> {
+pub fn reserved(i: &I) -> ParseRes<Reserved> {
     alt((
         value(Reserved::Define, tag(idents::DEFINE)),
         value(Reserved::Lambda, tag(idents::LAMBDA)),

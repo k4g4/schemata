@@ -61,7 +61,7 @@ pub enum Defs {
 }
 
 impl<'src> Syn<'src> {
-    pub fn eval(&'src self, scope: &Rc<Scope<'src>>, defs: Defs) -> Result<Item<'src>> {
+    pub fn eval(&self, scope: &Rc<Scope<'src>>, defs: Defs) -> Result<Item<'src>> {
         match self {
             &Self::Num(n) => Ok(Item::Num(n)),
 
@@ -75,6 +75,7 @@ impl<'src> Syn<'src> {
                 } else {
                     let builtin = match ident {
                         idents::APPLY => Item::Proc(Proc::Apply),
+                        idents::EVAL => Item::Proc(Proc::Eval(scope.clone())),
                         idents::EXIT => {
                             print!("-- Exited --");
                             process::exit(0)
@@ -176,18 +177,18 @@ impl<'src> Syn<'src> {
 
             Self::Reserved(reserved) => bail!("Unexpected '{reserved}'"),
 
-            Self::SExpr(sexpr) => sexpr.eval(scope, defs),
+            Self::SExpr(s_expr) => s_expr.eval(scope, defs),
 
             Self::Quoted(quoted) => {
-                fn eval_quoted<'src>(
-                    syn: &'src Syn<'src>,
+                fn eval_quoted<'a, 'src>(
+                    syn: &'a Syn<'src>,
                     scope: &Rc<Scope<'src>>,
                 ) -> Result<Item<'src>> {
                     match syn {
                         Syn::Ident(ident) => Ok(Item::Sym(ident)),
                         Syn::Reserved(reserved) => Ok(Item::Sym(reserved.as_str())),
-                        Syn::SExpr(sexpr) => Ok(Item::from_items(
-                            sexpr.iter().map(|syn| eval_quoted(syn, scope)),
+                        Syn::SExpr(s_expr) => Ok(Item::from_items(
+                            s_expr.iter().map(|syn| eval_quoted(syn, scope)),
                         )?),
                         _ => syn.eval(scope, Defs::NotAllowed),
                     }
@@ -209,8 +210,8 @@ impl fmt::Display for Syn<'_> {
             Self::String(string) => write!(f, "\"{string}\""),
             Self::Ident(ident) => write!(f, "{ident}"),
             Self::Reserved(reserved) => write!(f, "{reserved}"),
-            Self::SExpr(sexpr) if f.alternate() => write!(f, "{sexpr:#width$}"),
-            Self::SExpr(sexpr) => write!(f, "{sexpr:width$}"),
+            Self::SExpr(s_expr) if f.alternate() => write!(f, "{s_expr:#width$}"),
+            Self::SExpr(s_expr) => write!(f, "{s_expr:width$}"),
             Self::Quoted(quoted) => write!(f, "'{quoted}"),
         }
     }
