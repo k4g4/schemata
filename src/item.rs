@@ -95,7 +95,7 @@ impl<'src> Item<'src> {
             self = syn::eval_body(&body, scope, Defs::Allowed).with_context(|| {
                 anyhow!("[while evaluating <{}>]", name.unwrap_or(idents::LAMBDA))
             })?;
-            scope.pop()?;
+            scope.pop_stack()?;
             if matches!(self, Self::Defined) {
                 bail!("Ill-placed '{}'", idents::DEFINE);
             }
