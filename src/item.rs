@@ -4,7 +4,7 @@ use crate::{
     parse,
     proc::Proc,
     sexpr::SExpr,
-    syn::{self, Defs, Policy, Syn},
+    syn::{self, Defs, Syn},
     utils::{self, ItemsIter},
 };
 use anyhow::{anyhow, bail, Context, Result};
@@ -92,10 +92,9 @@ impl<'src> Item<'src> {
 
     pub fn resolve(mut self) -> Result<Self> {
         while let Self::Deferred { name, scope, body } = self {
-            self =
-                syn::eval_body(&body, scope, Defs::Allowed, Policy::Defer).with_context(|| {
-                    anyhow!("[while evaluating <{}>]", name.unwrap_or(idents::LAMBDA))
-                })?;
+            self = syn::eval_body(&body, scope, Defs::Allowed).with_context(|| {
+                anyhow!("[while evaluating <{}>]", name.unwrap_or(idents::LAMBDA))
+            })?;
             scope.pop()?;
             if matches!(self, Self::Defined) {
                 bail!("Ill-placed '{}'", idents::DEFINE);

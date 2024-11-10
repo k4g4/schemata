@@ -1,5 +1,5 @@
 use crate::{globals, item::Item};
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::{
     cell::{Cell, RefCell},
@@ -78,7 +78,7 @@ impl<'src> ScopeHandle<'src> {
     pub fn add(self, ident: &'src str, item: Item<'src>) -> Result<()> {
         let mut heap = self.mem.heap.borrow_mut();
         let Some(scope) = heap.get_mut(&self.id) else {
-            bail!("Failed to find scope for {:?}", self.id);
+            bail!("Failed to find scope for {self:?}");
         };
         // Redefinitions are only permitted in the global scope
         if scope.defs.insert(ident, item).is_some() && scope.parent.is_some() {
@@ -90,7 +90,7 @@ impl<'src> ScopeHandle<'src> {
     pub fn lookup(self, ident: &str) -> Result<Option<Item<'src>>> {
         let heap = self.mem.heap.borrow();
         let Some(scope) = heap.get(&self.id) else {
-            bail!("Failed to find scope for {:?}", self.id);
+            bail!("Failed to find scope for {self:?}");
         };
         if let Some(item) = scope.defs.get(ident).cloned() {
             Ok(Some(item))
@@ -113,6 +113,15 @@ impl<'src> ScopeHandle<'src> {
             bail!("Corrupted stack ({stack:?})");
         }
         Ok(())
+    }
+
+    pub fn remove(self) -> Result<()> {
+        self.mem
+            .heap
+            .borrow_mut()
+            .remove(&self.id)
+            .map(|_| ())
+            .with_context(|| anyhow!("Failed to find scope for {self:?}"))
     }
 
     pub fn collect_garbage(self) -> Result<()> {

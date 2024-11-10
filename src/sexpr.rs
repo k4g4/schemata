@@ -17,7 +17,7 @@ impl<'src> SExpr<'src> {
         Self(syns)
     }
 
-    pub fn eval(&self, scope: ScopeHandle<'src>, defs: Defs) -> Result<Item<'src>> {
+    pub fn eval(&self, scope: ScopeHandle<'src>, defs: Defs, policy: Policy) -> Result<Item<'src>> {
         match self.0.as_slice() {
             [] => Ok(Item::nil()),
 
@@ -84,7 +84,7 @@ impl<'src> SExpr<'src> {
             }
 
             [Syn::Reserved(Reserved::Begin), syns @ ..] if !syns.is_empty() => {
-                syn::eval_body(syns, scope, defs, Policy::Defer)
+                syn::eval_body(syns, scope, defs)
             }
 
             [Syn::Reserved(Reserved::Cond), conds @ ..] if !conds.is_empty() => {
@@ -99,12 +99,7 @@ impl<'src> SExpr<'src> {
 
                             [Syn::Reserved(Reserved::Else), syns @ ..] if !syns.is_empty() => {
                                 if i == conds.len() - 1 {
-                                    return syn::eval_body(
-                                        syns,
-                                        scope,
-                                        Defs::NotAllowed,
-                                        Policy::Defer,
-                                    );
+                                    return syn::eval_body(syns, scope, Defs::NotAllowed);
                                 } else {
                                     bail!("Ill-placed '{}'", idents::ELSE);
                                 };
@@ -113,12 +108,7 @@ impl<'src> SExpr<'src> {
                             [cond, syns @ ..] => {
                                 let item = cond.eval(scope, Defs::NotAllowed, Policy::Resolve)?;
                                 if item.is_truthy() {
-                                    return syn::eval_body(
-                                        syns,
-                                        scope,
-                                        Defs::NotAllowed,
-                                        Policy::Defer,
-                                    );
+                                    return syn::eval_body(syns, scope, Defs::NotAllowed);
                                 }
                             }
                         }
@@ -161,12 +151,18 @@ impl<'src> SExpr<'src> {
 
             [Syn::Reserved(reserved), ..] => bail!("Malformed '{}'", reserved.as_str()),
 
-            _ => Item::from_items(
-                self.0
-                    .iter()
-                    .map(|syn| syn.eval(scope, Defs::NotAllowed, Policy::Resolve)),
-            )
-            .and_then(Item::apply),
+            _ => {
+                let invoke = Item::from_items(
+                    self.0
+                        .iter()
+                        .map(|syn| syn.eval(scope, Defs::NotAllowed, Policy::Resolve)),
+                )?;
+                // tail call optimization
+                if policy == Policy::Defer {
+                    scope.remove()?;
+                }
+                invoke.apply()
+            }
         }
     }
 

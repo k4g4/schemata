@@ -190,7 +190,7 @@ impl<'src> Syn<'src> {
             Self::Reserved(reserved) => bail!("Unexpected '{reserved}'"),
 
             Self::SExpr(s_expr) => {
-                let item = s_expr.eval(scope, defs)?;
+                let item = s_expr.eval(scope, defs, policy)?;
                 if policy == Policy::Defer {
                     Ok(item)
                 } else {
@@ -240,11 +240,10 @@ pub fn eval_body<'src>(
     body: &[Syn<'src>],
     scope: ScopeHandle<'src>,
     defs: Defs,
-    policy: Policy,
 ) -> Result<Item<'src>> {
     let (last, must_resolve) = body.split_last().context("Unexpected empty body")?;
     for syn in must_resolve {
         syn.eval(scope, defs, Policy::Resolve)?;
     }
-    last.eval(scope, defs, policy)
+    last.eval(scope, defs, Policy::Defer)
 }
