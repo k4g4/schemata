@@ -10,7 +10,7 @@ use crate::{
 use anyhow::{anyhow, bail, Result};
 use std::{borrow::Cow, f64, fmt, rc::Rc};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum Item<'src> {
     Num(f64),
     String(Rc<Cow<'src, str>>),
@@ -21,7 +21,7 @@ pub enum Item<'src> {
     Defined,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Pair<'src> {
     pub head: Item<'src>,
     pub tail: Item<'src>,
@@ -77,9 +77,9 @@ impl<'src> Item<'src> {
         })
     }
 
-    pub fn scope(&self) -> Option<ScopeHandle<'src>> {
-        if let &Self::Proc(Proc::Compound { scope, .. }) = self {
-            Some(scope)
+    pub fn parent_scope(&self) -> Option<ScopeHandle<'src>> {
+        if let &Self::Proc(Proc::Compound { parent, .. }) = self {
+            Some(parent)
         } else {
             None
         }

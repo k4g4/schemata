@@ -9,7 +9,7 @@ pub fn indent(f: &mut fmt::Formatter, width: usize) -> fmt::Result {
     Ok(())
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ItemsIter<'a, 'src>(Option<&'a Pair<'src>>);
 
 impl<'a, 'src> ItemsIter<'a, 'src> {
@@ -35,7 +35,7 @@ impl<'a, 'src> Iterator for ItemsIter<'a, 'src> {
 
 impl FusedIterator for ItemsIter<'_, '_> {}
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct NumsIter<'a, 'src>(ItemsIter<'a, 'src>);
 
 impl<'a, 'src> TryFrom<ItemsIter<'a, 'src>> for NumsIter<'a, 'src> {

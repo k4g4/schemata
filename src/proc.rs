@@ -15,7 +15,7 @@ use std::{
     str,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum Proc<'src> {
     ListManip(ListManip),
     Arith(Arith),
@@ -40,7 +40,7 @@ pub enum Proc<'src> {
     Compound {
         name: Option<&'src str>,
         params: Rc<[&'src str]>,
-        scope: ScopeHandle<'src>,
+        parent: ScopeHandle<'src>,
         body: Rc<[Syn<'src>]>,
     },
 }
@@ -208,7 +208,7 @@ impl<'src> Proc<'src> {
             Self::Compound {
                 name,
                 params,
-                scope,
+                parent,
                 body,
             } => {
                 let debug = globals::debug();
@@ -216,7 +216,7 @@ impl<'src> Proc<'src> {
                 if debug {
                     eprint!("{}(", name.unwrap_or(idents::LAMBDA));
                 }
-                let scope = scope.new_local();
+                let scope = parent.new_local();
                 let mut args = args;
                 let before_dot_len = params
                     .iter()
@@ -265,6 +265,7 @@ impl<'src> Proc<'src> {
                         .eval(scope, Defs::Allowed)
                         .with_context(|| format!("[while evaluating {self}]"))?;
                 }
+                scope.pop()?;
                 if matches!(item, Item::Defined) {
                     bail!("Ill-placed '{}'", idents::DEFINE);
                 } else {

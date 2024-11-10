@@ -2,7 +2,7 @@ use crate::{
     error::ParserError,
     globals, idents,
     item::{Item, Token},
-    memory::{Heap, ScopeHandle},
+    memory::{Mem, ScopeHandle},
     sexpr::SExpr,
     syn::{Defs, Reserved, Syn},
 };
@@ -24,8 +24,8 @@ type ParseRes<'src, O> = nom::IResult<&'src I, O, ParserError<&'src I>>;
 
 pub fn repl(prelude: &I, input: &I) -> Result<()> {
     let (debug, pretty) = (globals::debug(), globals::pretty());
-    let heap = Heap::default();
-    let scope = ScopeHandle::new_global(&heap);
+    let mem = Mem::default();
+    let scope = ScopeHandle::new_global(&mem);
 
     let prelude_syns = read(syns)(prelude)?;
     let input_syns = read(syns)(input)?;

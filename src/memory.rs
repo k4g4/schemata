@@ -1,10 +1,13 @@
 use crate::{globals, item::Item};
 use anyhow::{bail, Result};
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::cell::{Cell, RefCell};
+use std::{
+    cell::{Cell, RefCell},
+    fmt,
+};
 
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Debug)]
-struct ScopeId(usize);
+struct ScopeId(u64);
 
 fn new_id() -> ScopeId {
     thread_local! {
@@ -13,53 +16,54 @@ fn new_id() -> ScopeId {
     CURR_ID.replace(ScopeId(CURR_ID.get().0 + 1))
 }
 
-#[derive(Debug)]
 struct Scope<'src> {
     parent: Option<ScopeId>,
     defs: FxHashMap<&'src str, Item<'src>>,
 }
 
-#[derive(Default, Debug)]
-pub struct Heap<'src>(RefCell<FxHashMap<ScopeId, Scope<'src>>>);
+#[derive(Default)]
+pub struct Mem<'src> {
+    heap: RefCell<FxHashMap<ScopeId, Scope<'src>>>,
+    stack: RefCell<Vec<ScopeId>>,
+}
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone)]
 pub struct ScopeHandle<'src> {
-    heap: &'src Heap<'src>,
+    mem: &'src Mem<'src>,
     id: ScopeId,
 }
 
 impl<'src> ScopeHandle<'src> {
-    pub fn new_global(heap: &'src Heap<'src>) -> Self {
+    pub fn new_global(mem: &'src Mem<'src>) -> Self {
         let id = new_id();
-        heap.0.borrow_mut().insert(
+        mem.heap.borrow_mut().insert(
             id,
             Scope {
                 parent: None,
                 defs: Default::default(),
             },
         );
-        Self { heap, id }
+        mem.stack.borrow_mut().push(id);
+        Self { mem, id }
     }
 
     pub fn new_local(self) -> Self {
         let id = new_id();
-        self.heap.0.borrow_mut().insert(
+        self.mem.heap.borrow_mut().insert(
             id,
             Scope {
                 parent: Some(self.id),
                 defs: Default::default(),
             },
         );
-        Self {
-            heap: self.heap,
-            id,
-        }
+        self.mem.stack.borrow_mut().push(id);
+        Self { mem: self.mem, id }
     }
 
     pub fn add(self, ident: &'src str, item: Item<'src>) -> Result<()> {
-        let mut heap = self.heap.0.borrow_mut();
+        let mut heap = self.mem.heap.borrow_mut();
         let Some(scope) = heap.get_mut(&self.id) else {
-            bail!("Failed to find scope for {self:?}");
+            bail!("Failed to find scope for {:?}", self.id);
         };
         // Redefinitions are only permitted in the global scope
         if scope.defs.insert(ident, item).is_some() && scope.parent.is_some() {
@@ -69,21 +73,31 @@ impl<'src> ScopeHandle<'src> {
     }
 
     pub fn lookup(self, ident: &str) -> Result<Option<Item<'src>>> {
-        let heap = self.heap.0.borrow();
+        let heap = self.mem.heap.borrow();
         let Some(scope) = heap.get(&self.id) else {
-            bail!("Failed to find scope for {self:?}");
+            bail!("Failed to find scope for {:?}", self.id);
         };
         if let Some(item) = scope.defs.get(ident).cloned() {
             Ok(Some(item))
         } else if let Some(parent) = scope.parent {
             Self {
-                heap: self.heap,
+                mem: self.mem,
                 id: parent,
             }
             .lookup(ident)
         } else {
             Ok(None)
         }
+    }
+
+    pub fn pop(self) -> Result<()> {
+        let mut stack = self.mem.stack.borrow_mut();
+        if stack.last().is_some_and(|&last_id| last_id == self.id) {
+            stack.pop();
+        } else {
+            bail!("Corrupted stack ({stack:?})");
+        }
+        Ok(())
     }
 
     pub fn collect_garbage(self) -> Result<()> {
@@ -96,39 +110,40 @@ impl<'src> ScopeHandle<'src> {
             return Ok(());
         }
 
-        let heap = self.heap.0.borrow();
-        let mut reachable = Default::default();
-        let mut next_id = Some(self.id);
-
-        fn get_reachable_ids(
-            heap: &Heap,
-            id: ScopeId,
-            reachable: &mut FxHashSet<ScopeId>,
-        ) -> Result<()> {
-            let heap_ref = heap.0.borrow();
-            let Some(scope) = heap_ref.get(&id) else {
-                bail!("Failed to find scope for {id:?}");
-            };
-            let handles = scope.defs.values().flat_map(Item::scope);
-            for handle in handles {
-                get_reachable_ids(heap, handle.id, reachable)?;
+        fn get_reachable(mem: &Mem, id: ScopeId, reachable: &mut FxHashSet<ScopeId>) -> Result<()> {
+            reachable.insert(id);
+            let heap = mem.heap.borrow();
+            let mut next_id = Some(id);
+            while let Some(id) = next_id {
+                let Some(scope) = heap.get(&id) else {
+                    bail!("Failed to find scope for {id:?}");
+                };
+                let parent_scopes = scope.defs.values().flat_map(Item::parent_scope);
+                for parent_scope in parent_scopes {
+                    if !reachable.contains(&parent_scope.id) {
+                        get_reachable(mem, parent_scope.id, reachable)?;
+                    }
+                }
+                next_id = scope.parent;
             }
             Ok(())
         }
 
-        while let Some(id) = next_id {
-            let Some(scope) = heap.get(&id) else {
-                bail!("Failed to find scope for {id:?}");
-            };
-            get_reachable_ids(&self.heap, id, &mut reachable)?;
-            next_id = scope.parent;
+        let mut reachable = Default::default();
+        for &id in self.mem.stack.borrow().iter() {
+            get_reachable(&self.mem, id, &mut reachable)?;
         }
 
-        drop(heap);
-        self.heap
-            .0
+        self.mem
+            .heap
             .borrow_mut()
             .retain(|id, _| reachable.contains(id));
         Ok(())
+    }
+}
+
+impl fmt::Debug for ScopeHandle<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.id.0)
     }
 }

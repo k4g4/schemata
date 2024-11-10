@@ -17,8 +17,8 @@ use std::{fs, path::PathBuf};
 #[repr(usize)]
 enum GcFreq {
     Off = 0,
-    Often = 10,
-    Rarely = 100,
+    Often = 1_000,
+    Rarely = 100_000,
 }
 
 /// A Scheme interpreter
