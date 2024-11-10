@@ -3,7 +3,7 @@ use crate::{
     item::Item,
     memory::ScopeHandle,
     proc::Proc,
-    syn::{Defs, Reserved, Syn},
+    syn::{self, Defs, Policy, Reserved, Syn},
     utils,
 };
 use anyhow::{bail, ensure, Result};
@@ -26,7 +26,7 @@ impl<'src> SExpr<'src> {
             }
 
             [Syn::Reserved(Reserved::Define), Syn::Ident(ident), def] => {
-                scope.add(ident, def.eval(scope, Defs::NotAllowed)?)?;
+                scope.add(ident, def.eval(scope, Defs::NotAllowed, Policy::Resolve)?)?;
                 Ok(Item::Defined)
             }
 
@@ -76,15 +76,16 @@ impl<'src> SExpr<'src> {
                     });
                     let mut items = Vec::with_capacity(defs.len() + 1);
                     items.push(Ok(proc));
-                    items.extend(defs.map(|def| def.eval(scope, Defs::NotAllowed)));
+                    items
+                        .extend(defs.map(|def| def.eval(scope, Defs::NotAllowed, Policy::Resolve)));
                     Item::from_items(items.into_iter())?
                 };
                 lambda.apply()
             }
 
-            [Syn::Reserved(Reserved::Begin), syn, syns @ ..] => syns
-                .iter()
-                .try_fold(syn.eval(scope, defs)?, |_, syn| syn.eval(scope, defs)),
+            [Syn::Reserved(Reserved::Begin), syns @ ..] if !syns.is_empty() => {
+                syn::eval_body(syns, scope, defs, Policy::Defer)
+            }
 
             [Syn::Reserved(Reserved::Cond), conds @ ..] if !conds.is_empty() => {
                 for (i, cond) in conds.iter().enumerate() {
@@ -96,24 +97,28 @@ impl<'src> SExpr<'src> {
                                 bail!("Malformed '{}'", idents::ELSE);
                             }
 
-                            [Syn::Reserved(Reserved::Else), syn, syns @ ..] => {
+                            [Syn::Reserved(Reserved::Else), syns @ ..] if !syns.is_empty() => {
                                 if i == conds.len() - 1 {
-                                    return syns
-                                        .iter()
-                                        .try_fold(syn.eval(scope, Defs::NotAllowed)?, |_, syn| {
-                                            syn.eval(scope, Defs::NotAllowed)
-                                        });
+                                    return syn::eval_body(
+                                        syns,
+                                        scope,
+                                        Defs::NotAllowed,
+                                        Policy::Defer,
+                                    );
                                 } else {
                                     bail!("Ill-placed '{}'", idents::ELSE);
                                 };
                             }
 
                             [cond, syns @ ..] => {
-                                let item = cond.eval(scope, Defs::NotAllowed)?;
+                                let item = cond.eval(scope, Defs::NotAllowed, Policy::Resolve)?;
                                 if item.is_truthy() {
-                                    return syns.iter().try_fold(item, |_, syn| {
-                                        syn.eval(scope, Defs::NotAllowed)
-                                    });
+                                    return syn::eval_body(
+                                        syns,
+                                        scope,
+                                        Defs::NotAllowed,
+                                        Policy::Defer,
+                                    );
                                 }
                             }
                         }
@@ -127,11 +132,11 @@ impl<'src> SExpr<'src> {
 
             [Syn::Reserved(Reserved::If), syns @ ..] => {
                 ensure!(matches!(syns.len(), 2 | 3), "Malformed '{}'", idents::IF);
-                let cond = syns[0].eval(scope, Defs::NotAllowed)?;
+                let cond = syns[0].eval(scope, Defs::NotAllowed, Policy::Resolve)?;
                 if cond.is_truthy() {
-                    syns[1].eval(scope, Defs::NotAllowed)
+                    syns[1].eval(scope, Defs::NotAllowed, Policy::Defer)
                 } else if let Some(alt) = syns.get(2) {
-                    alt.eval(scope, Defs::NotAllowed)
+                    alt.eval(scope, Defs::NotAllowed, Policy::Defer)
                 } else {
                     Ok(Item::void())
                 }
@@ -146,7 +151,7 @@ impl<'src> SExpr<'src> {
                         if done {
                             Ok((true, prev))
                         } else {
-                            let item = syn.eval(scope, Defs::NotAllowed)?.apply()?;
+                            let item = syn.eval(scope, Defs::NotAllowed, Policy::Resolve)?;
                             let done = item.is_truthy() ^ is_and;
                             Ok((done, item))
                         }
@@ -156,8 +161,12 @@ impl<'src> SExpr<'src> {
 
             [Syn::Reserved(reserved), ..] => bail!("Malformed '{}'", reserved.as_str()),
 
-            _ => Item::from_items(self.0.iter().map(|syn| syn.eval(scope, Defs::NotAllowed)))
-                .and_then(Item::apply),
+            _ => Item::from_items(
+                self.0
+                    .iter()
+                    .map(|syn| syn.eval(scope, Defs::NotAllowed, Policy::Resolve)),
+            )
+            .and_then(Item::apply),
         }
     }
 

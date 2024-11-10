@@ -4,10 +4,10 @@ use crate::{
     parse,
     proc::Proc,
     sexpr::SExpr,
-    syn::Syn,
+    syn::{self, Defs, Policy, Syn},
     utils::{self, ItemsIter},
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use std::{borrow::Cow, f64, fmt, rc::Rc};
 
 #[derive(Clone)]
@@ -19,6 +19,11 @@ pub enum Item<'src> {
     Token(Token),
     Sym(&'src str),
     Defined,
+    Deferred {
+        name: Option<&'src str>,
+        scope: ScopeHandle<'src>,
+        body: Rc<[Syn<'src>]>,
+    },
 }
 
 #[derive(Clone)]
@@ -85,28 +90,18 @@ impl<'src> Item<'src> {
         }
     }
 
-    pub fn into_syn(&self) -> Result<Syn<'src>> {
-        match self {
-            &Self::Num(num) => Ok(Syn::Num(num)),
-            Self::String(string) => Ok(Syn::String(string.as_ref().clone())),
-            Self::Token(Token::True) => Ok(Syn::Ident(idents::TRUE)),
-            Self::Token(Token::False) => Ok(Syn::Ident(idents::FALSE)),
-            Self::Token(Token::Void) => Ok(Syn::Ident(idents::VOID)),
-            Self::Sym(sym) => {
-                if let Ok((b"", reserved)) = parse::reserved(sym.as_bytes()) {
-                    Ok(Syn::Reserved(reserved))
-                } else {
-                    Ok(Syn::Ident(sym))
-                }
-            }
-            Self::Proc(_) | Self::Defined => Err(anyhow!("Unable to reflect on '{self}'")),
-            Self::Pair(pair) => {
-                let syns = ItemsIter::new(pair.as_deref())
-                    .map(Self::into_syn)
-                    .collect::<Result<Vec<_>>>()?;
-                Ok(Syn::SExpr(SExpr::new(syns)))
+    pub fn resolve(mut self) -> Result<Self> {
+        while let Self::Deferred { name, scope, body } = self {
+            self =
+                syn::eval_body(&body, scope, Defs::Allowed, Policy::Defer).with_context(|| {
+                    anyhow!("[while evaluating <{}>]", name.unwrap_or(idents::LAMBDA))
+                })?;
+            scope.pop()?;
+            if matches!(self, Self::Defined) {
+                bail!("Ill-placed '{}'", idents::DEFINE);
             }
         }
+        Ok(self)
     }
 
     pub fn apply(self) -> Result<Self> {
@@ -125,6 +120,32 @@ impl<'src> Item<'src> {
             Ok(self)
         }
     }
+
+    pub fn into_syn(&self) -> Result<Syn<'src>> {
+        match self {
+            &Self::Num(num) => Ok(Syn::Num(num)),
+            Self::String(string) => Ok(Syn::String(string.as_ref().clone())),
+            Self::Token(Token::True) => Ok(Syn::Ident(idents::TRUE)),
+            Self::Token(Token::False) => Ok(Syn::Ident(idents::FALSE)),
+            Self::Token(Token::Void) => Ok(Syn::Ident(idents::VOID)),
+            Self::Sym(sym) => {
+                if let Ok((b"", reserved)) = parse::reserved(sym.as_bytes()) {
+                    Ok(Syn::Reserved(reserved))
+                } else {
+                    Ok(Syn::Ident(sym))
+                }
+            }
+            Self::Proc(_) | Self::Deferred { .. } | Self::Defined => {
+                Err(anyhow!("Unable to reflect on '{self}'"))
+            }
+            Self::Pair(pair) => {
+                let syns = ItemsIter::new(pair.as_deref())
+                    .map(Self::into_syn)
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(Syn::SExpr(SExpr::new(syns)))
+            }
+        }
+    }
 }
 
 impl fmt::Display for Item<'_> {
@@ -141,7 +162,10 @@ impl fmt::Display for Item<'_> {
             Self::Proc(proc) => write!(f, "{proc}"),
             Self::Token(token) => write!(f, "{token}"),
             Self::Sym(sym) => write!(f, "{sym}"),
-            Self::Defined => write!(f, "<{}>", idents::DEFINE),
+            Self::Defined => write!(f, "[{}]", idents::DEFINE),
+            Self::Deferred { name, .. } => {
+                write!(f, "[Deferred - <{}>]", name.unwrap_or(idents::LAMBDA))
+            }
 
             Self::Pair(pair) => {
                 if let Some(Pair { head, tail }) = pair.as_deref() {

@@ -2,7 +2,7 @@ use crate::{
     globals, idents,
     item::{Item, Pair, Token},
     memory::ScopeHandle,
-    syn::{Defs, Syn},
+    syn::{Defs, Policy, Syn},
     utils::{ArgsIter, ItemsIter, NumsIter},
 };
 use anyhow::{anyhow, bail, ensure, Context, Result};
@@ -168,7 +168,7 @@ impl<'src> Proc<'src> {
             &Self::Eval(scope) => {
                 let ([item], []) = args.get(self)?;
                 let syn = item.into_syn()?;
-                syn.eval(scope, Defs::Allowed)
+                syn.eval(scope, Defs::Allowed, Policy::Defer)
             }
 
             Self::Display => {
@@ -259,18 +259,11 @@ impl<'src> Proc<'src> {
                     eprintln!();
                 }
 
-                let mut item = Item::nil();
-                for syn in body.iter() {
-                    item = syn
-                        .eval(scope, Defs::Allowed)
-                        .with_context(|| format!("[while evaluating {self}]"))?;
-                }
-                scope.pop()?;
-                if matches!(item, Item::Defined) {
-                    bail!("Ill-placed '{}'", idents::DEFINE);
-                } else {
-                    Ok(item)
-                }
+                Ok(Item::Deferred {
+                    name: name.clone(),
+                    scope,
+                    body: body.clone(),
+                })
             }
         }
     }

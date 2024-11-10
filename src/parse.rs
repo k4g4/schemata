@@ -4,7 +4,7 @@ use crate::{
     item::{Item, Token},
     memory::{Mem, ScopeHandle},
     sexpr::SExpr,
-    syn::{Defs, Reserved, Syn},
+    syn::{Defs, Policy, Reserved, Syn},
 };
 use anyhow::{anyhow, Result};
 use nom::{
@@ -31,7 +31,7 @@ pub fn repl(prelude: &I, input: &I) -> Result<()> {
     let input_syns = read(syns)(input)?;
 
     for syn in &prelude_syns {
-        syn.eval(scope, Defs::Allowed)?;
+        syn.eval(scope, Defs::Allowed, Policy::Resolve)?;
     }
 
     for syn in &input_syns {
@@ -44,7 +44,7 @@ pub fn repl(prelude: &I, input: &I) -> Result<()> {
             }
         }
 
-        let item = syn.eval(scope, Defs::Allowed)?;
+        let item = syn.eval(scope, Defs::Allowed, Policy::Resolve)?;
 
         if debug {
             println!("Evaluated:");

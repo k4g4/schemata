@@ -6,7 +6,7 @@ use crate::{
     sexpr::SExpr,
     utils,
 };
-use anyhow::{bail, ensure, Result};
+use anyhow::{bail, ensure, Context, Result};
 use std::{array, borrow::Cow, fmt, process, rc::Rc};
 
 #[derive(PartialEq, Clone, Debug)]
@@ -60,8 +60,14 @@ pub enum Defs {
     NotAllowed,
 }
 
+#[derive(PartialEq, Copy, Clone, Debug)]
+pub enum Policy {
+    Defer,
+    Resolve,
+}
+
 impl<'src> Syn<'src> {
-    pub fn eval(&self, scope: ScopeHandle<'src>, defs: Defs) -> Result<Item<'src>> {
+    pub fn eval(&self, scope: ScopeHandle<'src>, defs: Defs, policy: Policy) -> Result<Item<'src>> {
         scope.collect_garbage()?;
 
         match self {
@@ -183,7 +189,14 @@ impl<'src> Syn<'src> {
 
             Self::Reserved(reserved) => bail!("Unexpected '{reserved}'"),
 
-            Self::SExpr(s_expr) => s_expr.eval(scope, defs),
+            Self::SExpr(s_expr) => {
+                let item = s_expr.eval(scope, defs)?;
+                if policy == Policy::Defer {
+                    Ok(item)
+                } else {
+                    Ok(item.resolve()?)
+                }
+            }
 
             Self::Quoted(quoted) => {
                 fn eval_quoted<'a, 'src>(
@@ -196,7 +209,7 @@ impl<'src> Syn<'src> {
                         Syn::SExpr(s_expr) => Ok(Item::from_items(
                             s_expr.iter().map(|syn| eval_quoted(syn, scope)),
                         )?),
-                        _ => syn.eval(scope, Defs::NotAllowed),
+                        _ => syn.eval(scope, Defs::NotAllowed, Policy::Resolve),
                     }
                 }
                 eval_quoted(quoted, scope)
@@ -221,4 +234,17 @@ impl fmt::Display for Syn<'_> {
             Self::Quoted(quoted) => write!(f, "'{quoted}"),
         }
     }
+}
+
+pub fn eval_body<'src>(
+    body: &[Syn<'src>],
+    scope: ScopeHandle<'src>,
+    defs: Defs,
+    policy: Policy,
+) -> Result<Item<'src>> {
+    let (last, must_resolve) = body.split_last().context("Unexpected empty body")?;
+    for syn in must_resolve {
+        syn.eval(scope, defs, Policy::Resolve)?;
+    }
+    last.eval(scope, defs, policy)
 }
