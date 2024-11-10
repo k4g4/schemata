@@ -57,7 +57,13 @@ pub fn repl(prelude: &I, input: &I) -> Result<()> {
             }
         }
     }
+    scope.pop()?;
 
+    if debug {
+        eprintln!();
+        eprintln!("-- Memory --");
+        eprintln!("{mem:?}");
+    }
     Ok(())
 }
 

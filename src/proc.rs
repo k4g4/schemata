@@ -255,7 +255,7 @@ impl<'src> Proc<'src> {
                     );
                 }
                 if debug {
-                    eprintln!(")");
+                    eprintln!(") (Scope {scope:?})");
                     eprintln!();
                 }
 

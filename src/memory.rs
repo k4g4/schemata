@@ -27,6 +27,21 @@ pub struct Mem<'src> {
     stack: RefCell<Vec<ScopeId>>,
 }
 
+impl fmt::Debug for Mem<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Stack: {:?}", self.stack)?;
+        writeln!(f, "Heap:")?;
+        for (ScopeId(id), scope) in self.heap.borrow().iter() {
+            writeln!(f, "{id:03}:")?;
+            writeln!(f, "  parent({:?})", scope.parent)?;
+            for (ident, item) in &scope.defs {
+                writeln!(f, "    {ident} - {item}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Copy, Clone)]
 pub struct ScopeHandle<'src> {
     mem: &'src Mem<'src>,
