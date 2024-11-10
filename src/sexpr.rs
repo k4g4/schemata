@@ -159,7 +159,7 @@ impl<'src> SExpr<'src> {
                 )?;
                 // tail call optimization
                 if policy == Policy::Defer {
-                    scope.remove()?;
+                    scope.remove_heap()?;
                 }
                 invoke.apply()
             }

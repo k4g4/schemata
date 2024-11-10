@@ -17,14 +17,14 @@ use nom::{
     number::complete::double,
     sequence::{delimited, pair, preceded, terminated},
 };
-use std::{borrow::Cow, str};
+use std::{borrow::Cow, cell::RefCell, str};
 
 type I = [u8];
 type ParseRes<'src, O> = nom::IResult<&'src I, O, ParserError<&'src I>>;
 
 pub fn repl(prelude: &I, input: &I) -> Result<()> {
     let (debug, pretty) = (globals::debug(), globals::pretty());
-    let mem = Mem::default();
+    let mem = RefCell::new(Mem::default());
     let scope = ScopeHandle::new_global(&mem);
 
     let prelude_syns = read(syns)(prelude)?;
@@ -57,7 +57,7 @@ pub fn repl(prelude: &I, input: &I) -> Result<()> {
             }
         }
     }
-    scope.pop()?;
+    scope.pop_stack()?;
 
     if debug {
         eprintln!();
