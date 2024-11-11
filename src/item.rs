@@ -1,6 +1,6 @@
 use crate::{
     idents,
-    memory::ScopeHandle,
+    memory::ScopeRef,
     parse,
     proc::Proc,
     sexpr::SExpr,
@@ -21,7 +21,7 @@ pub enum Item<'src> {
     Defined,
     Deferred {
         name: Option<&'src str>,
-        scope: ScopeHandle<'src>,
+        scope: ScopeRef<'src>,
         body: Rc<[Syn<'src>]>,
     },
 }
@@ -82,7 +82,7 @@ impl<'src> Item<'src> {
         })
     }
 
-    pub fn parent_scope(&self) -> Option<ScopeHandle<'src>> {
+    pub fn parent_scope(&self) -> Option<ScopeRef<'src>> {
         if let &Self::Proc(Proc::Compound { parent, .. }) = self {
             Some(parent)
         } else {
@@ -98,11 +98,12 @@ impl<'src> Item<'src> {
             self = syn::eval_body(&body, scope, Defs::Allowed).with_context(|| {
                 anyhow!("[while evaluating <{}>]", name.unwrap_or(idents::LAMBDA))
             })?;
+            scope.remove_heap()?;
             if matches!(self, Self::Defined) {
                 bail!("Ill-placed '{}'", idents::DEFINE);
             }
         }
-        first_scope.map(ScopeHandle::pop_stack);
+        first_scope.map(ScopeRef::pop_stack);
         Ok(self)
     }
 

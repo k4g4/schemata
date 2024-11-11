@@ -1,7 +1,7 @@
 use crate::{
     idents,
     item::Item,
-    memory::ScopeHandle,
+    memory::ScopeRef,
     proc::{Arith, Cmp, Cxr, Is, ListManip, Proc, Trig},
     sexpr::SExpr,
     utils,
@@ -54,12 +54,14 @@ impl fmt::Display for Reserved {
     }
 }
 
+// Allowed enables the "define" macro
 #[derive(PartialEq, Copy, Clone, Debug)]
 pub enum Defs {
     Allowed,
     NotAllowed,
 }
 
+// Use Defer for tail call optimization
 #[derive(PartialEq, Copy, Clone, Debug)]
 pub enum Policy {
     Defer,
@@ -67,7 +69,7 @@ pub enum Policy {
 }
 
 impl<'src> Syn<'src> {
-    pub fn eval(&self, scope: ScopeHandle<'src>, defs: Defs, policy: Policy) -> Result<Item<'src>> {
+    pub fn eval(&self, scope: ScopeRef<'src>, defs: Defs, policy: Policy) -> Result<Item<'src>> {
         scope.collect_garbage()?;
 
         match self {
@@ -199,10 +201,7 @@ impl<'src> Syn<'src> {
             }
 
             Self::Quoted(quoted) => {
-                fn eval_quoted<'src>(
-                    syn: &Syn<'src>,
-                    scope: ScopeHandle<'src>,
-                ) -> Result<Item<'src>> {
+                fn eval_quoted<'src>(syn: &Syn<'src>, scope: ScopeRef<'src>) -> Result<Item<'src>> {
                     match syn {
                         Syn::Ident(ident) => Ok(Item::Sym(ident)),
                         Syn::Reserved(reserved) => Ok(Item::Sym(reserved.as_str())),
@@ -238,7 +237,7 @@ impl fmt::Display for Syn<'_> {
 
 pub fn eval_body<'src>(
     body: &[Syn<'src>],
-    scope: ScopeHandle<'src>,
+    scope: ScopeRef<'src>,
     defs: Defs,
 ) -> Result<Item<'src>> {
     let (last, must_resolve) = body.split_last().context("Unexpected empty body")?;

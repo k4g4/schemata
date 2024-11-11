@@ -1,7 +1,7 @@
 use crate::{
     idents,
     item::Item,
-    memory::ScopeHandle,
+    memory::ScopeRef,
     proc::Proc,
     syn::{self, Defs, Policy, Reserved, Syn},
     utils,
@@ -17,7 +17,7 @@ impl<'src> SExpr<'src> {
         Self(syns)
     }
 
-    pub fn eval(&self, scope: ScopeHandle<'src>, defs: Defs) -> Result<Item<'src>> {
+    pub fn eval(&self, scope: ScopeRef<'src>, defs: Defs) -> Result<Item<'src>> {
         match self.0.as_slice() {
             [] => Ok(Item::nil()),
 
@@ -147,20 +147,12 @@ impl<'src> SExpr<'src> {
 
             [Syn::Reserved(reserved), ..] => bail!("Malformed '{}'", reserved.as_str()),
 
-            _ => {
-                Item::from_items(
-                    self.0
-                        .iter()
-                        .map(|syn| syn.eval(scope, Defs::NotAllowed, Policy::Resolve)),
-                )
-                .and_then(Item::apply)
-                //TODO
-                // tail call optimization
-                // if policy == Policy::Defer {
-                //     scope.remove_heap()?;
-                // }
-                // invoke.apply()
-            }
+            _ => Item::from_items(
+                self.0
+                    .iter()
+                    .map(|syn| syn.eval(scope, Defs::NotAllowed, Policy::Resolve)),
+            )
+            .and_then(Item::apply),
         }
     }
 
@@ -169,7 +161,7 @@ impl<'src> SExpr<'src> {
     }
 
     fn create_proc(
-        scope: ScopeHandle<'src>,
+        scope: ScopeRef<'src>,
         name: Option<&'src str>,
         params: &[Syn<'src>],
         body: &[Syn<'src>],

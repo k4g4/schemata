@@ -1,7 +1,7 @@
 use crate::{
     globals, idents,
     item::{Item, Pair, Token},
-    memory::ScopeHandle,
+    memory::ScopeRef,
     syn::{Defs, Policy, Syn},
     utils::{ArgsIter, ItemsIter, NumsIter},
 };
@@ -32,7 +32,7 @@ pub enum Proc<'src> {
     Floor,
     Ceil,
     Apply,
-    Eval(ScopeHandle<'src>),
+    Eval(ScopeRef<'src>),
     Display,
     Newline,
     Error,
@@ -40,7 +40,7 @@ pub enum Proc<'src> {
     Compound {
         name: Option<&'src str>,
         params: Rc<[&'src str]>,
-        parent: ScopeHandle<'src>,
+        parent: ScopeRef<'src>,
         body: Rc<[Syn<'src>]>,
     },
 }
@@ -212,12 +212,12 @@ impl<'src> Proc<'src> {
                 body,
             } => {
                 let debug = globals::debug();
+                let scope = parent.new_local()?;
+                let mut args = args;
 
                 if debug {
                     eprint!("{}(", name.unwrap_or(idents::LAMBDA));
                 }
-                let scope = parent.new_local();
-                let mut args = args;
                 let before_dot_len = params
                     .iter()
                     .position(|&param| param == ".")

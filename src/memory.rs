@@ -1,5 +1,5 @@
 use crate::{globals, item::Item};
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::{
     cell::{Ref, RefCell},
@@ -11,6 +11,7 @@ struct ScopeId(u64);
 
 struct Scope<'src> {
     parent: Option<ScopeId>,
+    borrowed: bool,
     defs: FxHashMap<&'src str, Item<'src>>,
 }
 
@@ -39,25 +40,32 @@ impl fmt::Debug for Mem<'_> {
 }
 
 #[derive(Copy, Clone)]
-pub struct ScopeHandle<'src> {
+pub struct ScopeRef<'src> {
     mem: &'src RefCell<Mem<'src>>,
     id: ScopeId,
 }
 
-impl<'src> ScopeHandle<'src> {
+impl<'src> ScopeRef<'src> {
     pub fn new_global(mem: &'src RefCell<Mem<'src>>) -> Self {
         let id = {
             let mut mem = mem.borrow_mut();
             let id = ScopeId(mem.id_counter);
             mem.id_counter += 1;
             let defs = mem.defs_bin.pop().unwrap_or_default();
-            mem.heap.insert(id, Scope { parent: None, defs });
+            mem.heap.insert(
+                id,
+                Scope {
+                    parent: None,
+                    borrowed: false,
+                    defs,
+                },
+            );
             id
         };
         Self { mem, id }
     }
 
-    pub fn new_local(self) -> Self {
+    pub fn new_local(self) -> Result<Self> {
         let mut mem = self.mem.borrow_mut();
         let id = ScopeId(mem.id_counter);
         mem.id_counter += 1;
@@ -66,10 +74,16 @@ impl<'src> ScopeHandle<'src> {
             id,
             Scope {
                 parent: Some(self.id),
+                borrowed: false,
                 defs,
             },
         );
-        Self { mem: self.mem, id }
+        if let Some(scope) = mem.heap.get_mut(&self.id) {
+            scope.borrowed = true;
+            Ok(Self { mem: self.mem, id })
+        } else {
+            Err(anyhow!("Failed to find scope for {self:?}"))
+        }
     }
 
     pub fn add(self, ident: &'src str, item: Item<'src>) -> Result<()> {
@@ -79,9 +93,10 @@ impl<'src> ScopeHandle<'src> {
         };
         // Redefinitions are only permitted in the global scope
         if scope.defs.insert(ident, item).is_some() && scope.parent.is_some() {
-            bail!("Duplicate definition for '{ident}'");
+            Err(anyhow!("Duplicate definition for '{ident}'"))
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 
     pub fn lookup(self, ident: &str) -> Result<Option<Item<'src>>> {
@@ -109,27 +124,28 @@ impl<'src> ScopeHandle<'src> {
     pub fn pop_stack(self) -> Result<()> {
         let mut mem = self.mem.borrow_mut();
         loop {
-            let id = mem
-                .stack
-                .pop()
-                .with_context(|| anyhow!("Failed to find {self:?} in stack"))?;
+            let Some(id) = mem.stack.pop() else {
+                bail!("Failed to find {self:?} in stack");
+            };
             if id == self.id {
                 break Ok(());
             }
         }
     }
 
-    //TODO
-    // pub fn remove_heap(self) -> Result<()> {
-    //     let mut mem = self.mem.borrow_mut();
-    //     let Scope { mut defs, .. } = mem
-    //         .heap
-    //         .remove(&self.id)
-    //         .with_context(|| anyhow!("Failed to find scope for {self:?}"))?;
-    //     defs.clear();
-    //     mem.defs_bin.push(defs);
-    //     Ok(())
-    // }
+    pub fn remove_heap(self) -> Result<()> {
+        let mut mem = self.mem.borrow_mut();
+        let Mem { heap, defs_bin, .. } = &mut *mem;
+        let Some(scope) = heap.get_mut(&self.id) else {
+            bail!("Failed to find scope for {self:?}");
+        };
+        if !scope.borrowed {
+            scope.defs.clear();
+            defs_bin.push(mem::take(&mut scope.defs));
+            println!("recycled!");
+        }
+        Ok(())
+    }
 
     pub fn collect_garbage(self) -> Result<()> {
         // Run garbage collection based on the configured frequency
@@ -188,7 +204,7 @@ impl<'src> ScopeHandle<'src> {
     }
 }
 
-impl fmt::Debug for ScopeHandle<'_> {
+impl fmt::Debug for ScopeRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.id.0)
     }
