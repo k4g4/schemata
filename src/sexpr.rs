@@ -17,7 +17,7 @@ impl<'src> SExpr<'src> {
         Self(syns)
     }
 
-    pub fn eval(&self, scope: ScopeHandle<'src>, defs: Defs, policy: Policy) -> Result<Item<'src>> {
+    pub fn eval(&self, scope: ScopeHandle<'src>, defs: Defs) -> Result<Item<'src>> {
         match self.0.as_slice() {
             [] => Ok(Item::nil()),
 
@@ -67,20 +67,16 @@ impl<'src> SExpr<'src> {
                         unreachable!("already checked")
                     }
                 });
-                let lambda = {
-                    let proc = Item::Proc(Proc::Compound {
-                        name: None,
-                        params,
-                        parent: scope, //scope.get_handle(),
-                        body: body.into(),
-                    });
-                    let mut items = Vec::with_capacity(defs.len() + 1);
-                    items.push(Ok(proc));
-                    items
-                        .extend(defs.map(|def| def.eval(scope, Defs::NotAllowed, Policy::Resolve)));
-                    Item::from_items(items.into_iter())?
-                };
-                lambda.apply()
+                let proc = Item::Proc(Proc::Compound {
+                    name: None,
+                    params,
+                    parent: scope,
+                    body: body.into(),
+                });
+                let mut items = Vec::with_capacity(defs.len() + 1);
+                items.push(Ok(proc));
+                items.extend(defs.map(|def| def.eval(scope, Defs::NotAllowed, Policy::Resolve)));
+                Item::from_items(items.into_iter()).and_then(Item::apply)
             }
 
             [Syn::Reserved(Reserved::Begin), syns @ ..] if !syns.is_empty() => {
@@ -152,16 +148,18 @@ impl<'src> SExpr<'src> {
             [Syn::Reserved(reserved), ..] => bail!("Malformed '{}'", reserved.as_str()),
 
             _ => {
-                let invoke = Item::from_items(
+                Item::from_items(
                     self.0
                         .iter()
                         .map(|syn| syn.eval(scope, Defs::NotAllowed, Policy::Resolve)),
-                )?;
+                )
+                .and_then(Item::apply)
+                //TODO
                 // tail call optimization
-                if policy == Policy::Defer {
-                    scope.remove_heap()?;
-                }
-                invoke.apply()
+                // if policy == Policy::Defer {
+                //     scope.remove_heap()?;
+                // }
+                // invoke.apply()
             }
         }
     }

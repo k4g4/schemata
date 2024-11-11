@@ -14,11 +14,11 @@ use clap::{Parser, ValueEnum};
 use std::{fs, path::PathBuf};
 
 #[derive(Copy, Clone, ValueEnum, Debug)]
-#[repr(usize)]
+#[repr(u64)]
 enum GcFreq {
     Off = 0,
-    Often = 1_000,
-    Rarely = 100_000,
+    Often = 10_000,
+    Rarely = 1_000_000,
 }
 
 /// A Scheme interpreter
@@ -48,7 +48,7 @@ fn main() -> Result<()> {
 
     globals::set_debug(debug);
     globals::set_pretty(pretty);
-    globals::set_gc_freq(gc_freq as usize);
+    globals::set_gc_freq(gc_freq as u64);
 
     let prelude = include_bytes!("../prelude.scm");
 

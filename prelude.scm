@@ -158,9 +158,11 @@
                 (count-leaves (cdr tree))))))
 
 (define (range from to step)
-    (if ((if (> step 0) >= <=) from to)
-        nil
-        (cons from (range (+ from step) to step))))
+    (define (range_ res i)
+        (if ((if (> step 0) >= <=) i from)
+            (range_ (cons i res) (- i step))
+            res))
+    (range_ nil to))
 
 (define (append . lists)
     (define (append2 acc list)

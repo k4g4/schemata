@@ -2,19 +2,12 @@ use crate::{globals, item::Item};
 use anyhow::{anyhow, bail, Context, Result};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::{
-    cell::{Cell, Ref, RefCell},
-    fmt,
+    cell::{Ref, RefCell},
+    fmt, mem,
 };
 
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Debug)]
 struct ScopeId(u64);
-
-fn new_id() -> ScopeId {
-    thread_local! {
-        static CURR_ID: Cell<ScopeId> = Cell::new(ScopeId(0));
-    }
-    CURR_ID.replace(ScopeId(CURR_ID.get().0 + 1))
-}
 
 struct Scope<'src> {
     parent: Option<ScopeId>,
@@ -25,6 +18,8 @@ struct Scope<'src> {
 pub struct Mem<'src> {
     heap: FxHashMap<ScopeId, Scope<'src>>,
     stack: Vec<ScopeId>,
+    id_counter: u64,
+    gc_counter: u64,
     defs_bin: Vec<FxHashMap<&'src str, Item<'src>>>,
 }
 
@@ -51,19 +46,21 @@ pub struct ScopeHandle<'src> {
 
 impl<'src> ScopeHandle<'src> {
     pub fn new_global(mem: &'src RefCell<Mem<'src>>) -> Self {
-        let id = new_id();
-        {
+        let id = {
             let mut mem = mem.borrow_mut();
+            let id = ScopeId(mem.id_counter);
+            mem.id_counter += 1;
             let defs = mem.defs_bin.pop().unwrap_or_default();
             mem.heap.insert(id, Scope { parent: None, defs });
-            mem.stack.push(id);
-        }
+            id
+        };
         Self { mem, id }
     }
 
     pub fn new_local(self) -> Self {
-        let id = new_id();
         let mut mem = self.mem.borrow_mut();
+        let id = ScopeId(mem.id_counter);
+        mem.id_counter += 1;
         let defs = mem.defs_bin.pop().unwrap_or_default();
         mem.heap.insert(
             id,
@@ -72,7 +69,6 @@ impl<'src> ScopeHandle<'src> {
                 defs,
             },
         );
-        mem.stack.push(id);
         Self { mem: self.mem, id }
     }
 
@@ -106,33 +102,45 @@ impl<'src> ScopeHandle<'src> {
         }
     }
 
-    pub fn pop_stack(self) -> Result<()> {
-        let mut mem = self.mem.borrow_mut();
-        if mem.stack.last().is_some_and(|&last_id| last_id == self.id) {
-            mem.stack.pop();
-        } else {
-            bail!("Corrupted stack ({:?})", mem.stack);
-        }
-        Ok(())
+    pub fn push_stack(self) {
+        self.mem.borrow_mut().stack.push(self.id);
     }
 
-    pub fn remove_heap(self) -> Result<()> {
-        self.mem
-            .borrow_mut()
-            .heap
-            .remove(&self.id)
-            .map(|_| ())
-            .with_context(|| anyhow!("Failed to find scope for {self:?}"))
+    pub fn pop_stack(self) -> Result<()> {
+        let mut mem = self.mem.borrow_mut();
+        loop {
+            let id = mem
+                .stack
+                .pop()
+                .with_context(|| anyhow!("Failed to find {self:?} in stack"))?;
+            if id == self.id {
+                break Ok(());
+            }
+        }
     }
+
+    //TODO
+    // pub fn remove_heap(self) -> Result<()> {
+    //     let mut mem = self.mem.borrow_mut();
+    //     let Scope { mut defs, .. } = mem
+    //         .heap
+    //         .remove(&self.id)
+    //         .with_context(|| anyhow!("Failed to find scope for {self:?}"))?;
+    //     defs.clear();
+    //     mem.defs_bin.push(defs);
+    //     Ok(())
+    // }
 
     pub fn collect_garbage(self) -> Result<()> {
         // Run garbage collection based on the configured frequency
-        thread_local! {
-            static FREQ: Cell<usize> = Cell::new(0);
-        }
-        let freq = globals::gc_freq();
-        if freq == 0 || FREQ.replace((FREQ.get() + 1) % freq) != freq - 1 {
-            return Ok(());
+        {
+            let mut mem = self.mem.borrow_mut();
+            let freq = globals::gc_freq();
+            mem.gc_counter += 1;
+            mem.gc_counter %= freq;
+            if freq == 0 || mem.gc_counter % freq != freq - 1 {
+                return Ok(());
+            }
         }
 
         fn get_reachable(
@@ -157,16 +165,25 @@ impl<'src> ScopeHandle<'src> {
             Ok(())
         }
 
-        let mut reachable = Default::default();
-        let mem = self.mem.borrow();
-        for &id in mem.stack.iter() {
-            get_reachable(Ref::clone(&mem), id, &mut reachable)?;
-        }
+        let reachable = {
+            let mut reachable = Default::default();
+            let mem = self.mem.borrow();
+            for &id in mem.stack.iter() {
+                get_reachable(Ref::clone(&mem), id, &mut reachable)?;
+            }
+            reachable
+        };
 
-        self.mem
-            .borrow_mut()
-            .heap
-            .retain(|id, _| reachable.contains(id));
+        let mut mem = self.mem.borrow_mut();
+        let Mem { heap, defs_bin, .. } = &mut *mem;
+        heap.retain(|id, Scope { defs, .. }| {
+            let retain = reachable.contains(id);
+            if !retain {
+                defs.clear();
+                defs_bin.push(mem::take(defs));
+            }
+            retain
+        });
         Ok(())
     }
 }

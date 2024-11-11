@@ -190,7 +190,7 @@ impl<'src> Syn<'src> {
             Self::Reserved(reserved) => bail!("Unexpected '{reserved}'"),
 
             Self::SExpr(s_expr) => {
-                let item = s_expr.eval(scope, defs, policy)?;
+                let item = s_expr.eval(scope, defs)?;
                 if policy == Policy::Defer {
                     Ok(item)
                 } else {
@@ -199,8 +199,8 @@ impl<'src> Syn<'src> {
             }
 
             Self::Quoted(quoted) => {
-                fn eval_quoted<'a, 'src>(
-                    syn: &'a Syn<'src>,
+                fn eval_quoted<'src>(
+                    syn: &Syn<'src>,
                     scope: ScopeHandle<'src>,
                 ) -> Result<Item<'src>> {
                     match syn {

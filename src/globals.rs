@@ -3,7 +3,7 @@ use std::cell::Cell;
 thread_local! {
     static DEBUG: Cell<bool> = Default::default();
     static PRETTY: Cell<bool> = Default::default();
-    static GC_FREQ: Cell<usize> = Default::default();
+    static GC_FREQ: Cell<u64> = Default::default();
 }
 
 pub fn debug() -> bool {
@@ -22,10 +22,10 @@ pub fn set_pretty(pretty: bool) {
     PRETTY.set(pretty)
 }
 
-pub fn gc_freq() -> usize {
+pub fn gc_freq() -> u64 {
     GC_FREQ.get()
 }
 
-pub fn set_gc_freq(freq: usize) {
+pub fn set_gc_freq(freq: u64) {
     GC_FREQ.set(freq)
 }
