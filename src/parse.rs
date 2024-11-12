@@ -17,7 +17,7 @@ use nom::{
     number::complete::double,
     sequence::{delimited, pair, preceded, terminated},
 };
-use std::{borrow::Cow, cell::RefCell, str};
+use std::{cell::RefCell, rc::Rc, str};
 
 type I = [u8];
 type ParseRes<'src, O> = nom::IResult<&'src I, O, ParserError<&'src I>>;
@@ -141,12 +141,12 @@ fn ident(i: &I) -> ParseRes<&str> {
     )(i)
 }
 
-fn string(i: &I) -> ParseRes<Cow<'_, str>> {
+fn string(i: &I) -> ParseRes<Rc<str>> {
     let (quote, escaped) = (r#"""#, r#"\""#);
-    map(
+    into(map(
         map(
             delimited(
-                char('"'),
+                char::<_, ParserError<&I>>('"'),
                 recognize(many0_count(alt((value('"', tag(escaped)), none_of(quote))))),
                 char('"'),
             ),
@@ -158,7 +158,7 @@ fn string(i: &I) -> ParseRes<Cow<'_, str>> {
             }
             s
         },
-    )(i)
+    ))(i)
 }
 
 fn s_expr(i: &I) -> ParseRes<SExpr> {

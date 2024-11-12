@@ -7,12 +7,12 @@ use crate::{
     utils,
 };
 use anyhow::{bail, ensure, Context, Result};
-use std::{array, borrow::Cow, fmt, process, rc::Rc};
+use std::{array, fmt, process, rc::Rc};
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum Syn<'src> {
     Num(f64),
-    String(Cow<'src, str>),
+    String(Rc<str>),
     Ident(&'src str),
     Reserved(Reserved),
     SExpr(SExpr<'src>),
@@ -75,7 +75,7 @@ impl<'src> Syn<'src> {
         match self {
             &Self::Num(n) => Ok(Item::Num(n)),
 
-            Self::String(string) => Ok(Item::String(Rc::new(string.clone()))),
+            Self::String(string) => Ok(Item::String(string.clone())),
 
             Self::Ident(".") => bail!("Improperly placed dot"),
 

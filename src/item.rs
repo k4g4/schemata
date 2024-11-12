@@ -8,12 +8,12 @@ use crate::{
     utils::{self, ItemsIter},
 };
 use anyhow::{anyhow, bail, Context, Result};
-use std::{borrow::Cow, f64, fmt, rc::Rc};
+use std::{f64, fmt, rc::Rc};
 
 #[derive(Clone)]
 pub enum Item<'src> {
     Num(f64),
-    String(Rc<Cow<'src, str>>),
+    String(Rc<str>),
     Pair(Option<Rc<Pair<'src>>>),
     Proc(Proc<'src>),
     Token(Token),
@@ -125,7 +125,7 @@ impl<'src> Item<'src> {
     pub fn into_syn(&self) -> Result<Syn<'src>> {
         match self {
             &Self::Num(num) => Ok(Syn::Num(num)),
-            Self::String(string) => Ok(Syn::String(string.as_ref().clone())),
+            Self::String(string) => Ok(Syn::String(string.clone())),
             Self::Token(Token::True) => Ok(Syn::Ident(idents::TRUE)),
             Self::Token(Token::False) => Ok(Syn::Ident(idents::FALSE)),
             Self::Token(Token::Void) => Ok(Syn::Ident(idents::VOID)),

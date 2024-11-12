@@ -7,9 +7,9 @@ use crate::{
 };
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use std::{
-    borrow::Cow,
     f64, fmt, iter,
     ops::{Add, Div, Mul, Sub},
+    ptr,
     rc::Rc,
     str,
 };
@@ -60,7 +60,9 @@ impl<'src> Proc<'src> {
                     (Item::Num(lhs), Item::Num(rhs)) => lhs == rhs,
                     (Item::Token(lhs), Item::Token(rhs)) => lhs == rhs,
                     (Item::Sym(lhs), Item::Sym(rhs)) => lhs == rhs,
-                    (Item::String(lhs), Item::String(rhs)) => Rc::as_ptr(lhs) == Rc::as_ptr(rhs),
+                    (Item::String(lhs), Item::String(rhs)) => {
+                        ptr::eq(Rc::as_ptr(lhs), Rc::as_ptr(rhs))
+                    }
                     (Item::Pair(None), Item::Pair(None)) => true,
                     (Item::Pair(Some(lhs)), Item::Pair(Some(rhs))) => {
                         Rc::as_ptr(lhs) == Rc::as_ptr(rhs)
@@ -196,8 +198,7 @@ impl<'src> Proc<'src> {
                         Err(anyhow!("Arguments must be strings"))
                     }
                 })
-                .map(Cow::Owned)
-                .map(Rc::new)
+                .map(Into::into)
                 .map(Item::String),
         }
     }

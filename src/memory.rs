@@ -49,7 +49,6 @@ pub struct ScopeRef<'src> {
 
 impl<'src> ScopeRef<'src> {
     pub fn new_global(mem: &'src RefCell<Mem<'src>>) -> Self {
-        println!("{}", mem::size_of::<Item>());
         let id = {
             let mut mem = mem.borrow_mut();
             let id = ScopeId(mem.id_counter);
