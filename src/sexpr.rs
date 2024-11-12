@@ -2,7 +2,7 @@ use crate::{
     idents,
     item::Item,
     memory::ScopeRef,
-    proc::Proc,
+    proc::{Compound, Proc},
     syn::{self, Defs, Policy, Reserved, Syn},
     utils,
 };
@@ -25,41 +25,44 @@ impl<'src> SExpr<'src> {
                 bail!("Ill-placed '{}'", idents::DEFINE);
             }
 
-            [Syn::Reserved(Reserved::Define), Syn::Ident(ident), def] => {
-                scope.add(ident, def.eval(scope, Defs::NotAllowed, Policy::Resolve)?)?;
-                Ok(Item::Defined)
-            }
+            [Syn::Reserved(Reserved::Define), Syn::Ident(ident), def] => def
+                .eval(scope, Defs::NotAllowed, Policy::Resolve)
+                .and_then(|item| scope.add(ident, item))
+                .map(|_| Item::Defined),
 
             [Syn::Reserved(Reserved::Define), Syn::SExpr(signature), body @ ..] => {
                 if let [Syn::Ident(ident), params @ ..] = signature.0.as_slice() {
-                    scope.add(ident, Self::create_proc(scope, Some(ident), params, body)?)?;
-                    Ok(Item::Defined)
+                    let item = Item::Proc(Proc::Compound(Compound::new(Some(ident), scope, params.iter(), body)?));
+                        scope.add(ident, item)?;
+                        Ok(Item::Defined)
                 } else {
                     bail!("Malformed signature")
                 }
             }
 
             [Syn::Reserved(Reserved::Lambda), Syn::SExpr(params), body @ ..] => {
-                Self::create_proc(scope, None, &params.0, body)
+                Ok(Item::Proc(Proc::Compound(Compound::new(None, scope, params.0.iter(), body)?)))
             }
 
             [Syn::Reserved(Reserved::Let), Syn::SExpr(mappings), body @ ..] => {
                 ensure!(!body.is_empty(), "Empty '{}' body", idents::LET);
-                let params = mappings
-                    .0
-                    .iter()
-                    .map(|mapping| {
-                        if let Syn::SExpr(s_expr) = mapping {
-                            if let &[Syn::Ident(param), _] = s_expr.0.as_slice() {
-                                Ok(param)
-                            } else {
-                                bail!("Malformed '{}'", idents::LET);
-                            }
+                ensure!(
+                    mappings.0.iter().all(|mapping| {
+                        matches!(mapping, Syn::SExpr(s_expr) if matches!(s_expr.0.as_slice(), [Syn::Ident(_), _]))                    
+                    }),
+                    "Malformed '{}'", idents::LET,
+                );
+                let params = mappings.0.iter().map(|mapping| {
+                    if let Syn::SExpr(s_expr) = mapping {
+                        if let [param @ Syn::Ident(_), _] = s_expr.0.as_slice() {
+                            param
                         } else {
-                            bail!("Malformed '{}'", idents::LET);
+                            panic!("already checked")
                         }
-                    })
-                    .collect::<Result<_>>()?;
+                    } else {
+                        panic!("already checked")
+                    }
+                });
                 let defs = mappings.0.iter().map(|mapping| {
                     if let Syn::SExpr(s_expr) = mapping {
                         &s_expr.0[1]
@@ -67,12 +70,7 @@ impl<'src> SExpr<'src> {
                         unreachable!("already checked")
                     }
                 });
-                let proc = Item::Proc(Proc::Compound {
-                    name: None,
-                    params,
-                    parent: scope,
-                    body: body.into(),
-                });
+                let proc = Item::Proc(Proc::Compound(Compound::new(None, scope, params, body)?));
                 let mut items = Vec::with_capacity(defs.len() + 1);
                 items.push(Ok(proc));
                 items.extend(defs.map(|def| def.eval(scope, Defs::NotAllowed, Policy::Resolve)));
@@ -158,48 +156,6 @@ impl<'src> SExpr<'src> {
 
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Syn<'src>> {
         self.0.iter()
-    }
-
-    fn create_proc(
-        scope: ScopeRef<'src>,
-        name: Option<&'src str>,
-        params: &[Syn<'src>],
-        body: &[Syn<'src>],
-    ) -> Result<Item<'src>> {
-        ensure!(!body.is_empty(), "Empty '{}' body", idents::DEFINE);
-        if let Some(Syn::Ident(duplicate)) = params
-            .iter()
-            .find(|param| params.iter().filter(|p| p == param).count() != 1)
-        {
-            bail!(
-                "Duplicate parameter '{duplicate}' specified for {}",
-                name.unwrap_or(idents::LAMBDA)
-            );
-        }
-        if let Some(dot_pos) = params.iter().position(|syn| matches!(syn, Syn::Ident("."))) {
-            ensure!(
-                dot_pos == params.len().wrapping_sub(2),
-                "Misplaced dot in signature in {}",
-                name.unwrap_or(idents::LAMBDA)
-            );
-        }
-
-        let params = params
-            .iter()
-            .map(|param| {
-                if let &Syn::Ident(ident) = param {
-                    Ok(ident)
-                } else {
-                    bail!("'{param}' is not a valid parameter name");
-                }
-            })
-            .collect::<Result<_>>()?;
-        Ok(Item::Proc(Proc::Compound {
-            name,
-            params,
-            parent: scope,
-            body: body.into(),
-        }))
     }
 }
 

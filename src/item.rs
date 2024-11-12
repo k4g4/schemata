@@ -2,7 +2,7 @@ use crate::{
     idents,
     memory::ScopeRef,
     parse,
-    proc::Proc,
+    proc::{Compound, Proc},
     sexpr::SExpr,
     syn::{self, Defs, Syn},
     utils::{self, ItemsIter},
@@ -20,9 +20,8 @@ pub enum Item<'src> {
     Sym(&'src str),
     Defined,
     Deferred {
-        name: Option<&'src str>,
         scope: ScopeRef<'src>,
-        body: Rc<[Syn<'src>]>,
+        compound: Rc<Compound<'src>>,
     },
 }
 
@@ -83,8 +82,8 @@ impl<'src> Item<'src> {
     }
 
     pub fn parent_scope(&self) -> Option<ScopeRef<'src>> {
-        if let &Self::Proc(Proc::Compound { parent, .. }) = self {
-            Some(parent)
+        if let Self::Proc(Proc::Compound(compound)) = self {
+            Some(compound.parent_scope())
         } else {
             None
         }
@@ -92,12 +91,11 @@ impl<'src> Item<'src> {
 
     pub fn resolve(mut self) -> Result<Self> {
         let mut first_scope = None;
-        while let Self::Deferred { name, scope, body } = self {
+        while let Self::Deferred { scope, compound } = self {
             scope.push_stack();
             first_scope = first_scope.or(Some(scope));
-            self = syn::eval_body(&body, scope, Defs::Allowed).with_context(|| {
-                anyhow!("[while evaluating <{}>]", name.unwrap_or(idents::LAMBDA))
-            })?;
+            self = syn::eval_body(&compound.body(), scope, Defs::Allowed)
+                .with_context(|| anyhow!("[while evaluating {compound}]"))?;
             scope.remove_heap()?;
             if matches!(self, Self::Defined) {
                 bail!("Ill-placed '{}'", idents::DEFINE);
@@ -166,8 +164,8 @@ impl fmt::Display for Item<'_> {
             Self::Token(token) => write!(f, "{token}"),
             Self::Sym(sym) => write!(f, "{sym}"),
             Self::Defined => write!(f, "[{}]", idents::DEFINE),
-            Self::Deferred { name, .. } => {
-                write!(f, "[Deferred - <{}>]", name.unwrap_or(idents::LAMBDA))
+            Self::Deferred { compound, .. } => {
+                write!(f, "[Deferred - {compound}]")
             }
 
             Self::Pair(pair) => {

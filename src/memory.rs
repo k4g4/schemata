@@ -6,13 +6,15 @@ use std::{
     fmt, mem,
 };
 
+type Defs<'src> = FxHashMap<&'src str, Item<'src>>;
+
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Debug)]
 struct ScopeId(u64);
 
 struct Scope<'src> {
     parent: Option<ScopeId>,
     borrowed: bool,
-    defs: FxHashMap<&'src str, Item<'src>>,
+    defs: Defs<'src>,
 }
 
 #[derive(Default)]
@@ -21,13 +23,13 @@ pub struct Mem<'src> {
     stack: Vec<ScopeId>,
     id_counter: u64,
     gc_counter: u64,
-    defs_bin: Vec<FxHashMap<&'src str, Item<'src>>>,
+    defs_bin: Vec<Defs<'src>>,
 }
 
 impl fmt::Debug for Mem<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Stack: {:?}", self.stack)?;
-        writeln!(f, "Heap:")?;
+        writeln!(f, "Heap: ({} scopes)", self.heap.len())?;
         for (ScopeId(id), scope) in self.heap.iter() {
             writeln!(f, "{id:03}:")?;
             writeln!(f, "  parent({:?})", scope.parent)?;
@@ -47,17 +49,17 @@ pub struct ScopeRef<'src> {
 
 impl<'src> ScopeRef<'src> {
     pub fn new_global(mem: &'src RefCell<Mem<'src>>) -> Self {
+        println!("{}", mem::size_of::<Item>());
         let id = {
             let mut mem = mem.borrow_mut();
             let id = ScopeId(mem.id_counter);
             mem.id_counter += 1;
-            let defs = mem.defs_bin.pop().unwrap_or_default();
             mem.heap.insert(
                 id,
                 Scope {
                     parent: None,
                     borrowed: false,
-                    defs,
+                    defs: Default::default(),
                 },
             );
             id
@@ -136,13 +138,14 @@ impl<'src> ScopeRef<'src> {
     pub fn remove_heap(self) -> Result<()> {
         let mut mem = self.mem.borrow_mut();
         let Mem { heap, defs_bin, .. } = &mut *mem;
-        let Some(scope) = heap.get_mut(&self.id) else {
+        let Some(mut scope) = heap.remove(&self.id) else {
             bail!("Failed to find scope for {self:?}");
         };
-        if !scope.borrowed {
+        if scope.borrowed {
+            heap.insert(self.id, scope);
+        } else if scope.defs.capacity() > 0 {
             scope.defs.clear();
             defs_bin.push(mem::take(&mut scope.defs));
-            println!("recycled!");
         }
         Ok(())
     }
@@ -152,9 +155,12 @@ impl<'src> ScopeRef<'src> {
         {
             let mut mem = self.mem.borrow_mut();
             let freq = globals::gc_freq();
+            if freq == 0 {
+                return Ok(());
+            }
             mem.gc_counter += 1;
             mem.gc_counter %= freq;
-            if freq == 0 || mem.gc_counter % freq != freq - 1 {
+            if mem.gc_counter % freq != freq - 1 {
                 return Ok(());
             }
         }
@@ -168,7 +174,7 @@ impl<'src> ScopeRef<'src> {
             let mut next_id = Some(id);
             while let Some(id) = next_id {
                 let Some(scope) = mem.heap.get(&id) else {
-                    bail!("Failed to find scope for {id:?}");
+                    return Ok(());
                 };
                 let parent_scopes = scope.defs.values().flat_map(Item::parent_scope);
                 for parent_scope in parent_scopes {
@@ -194,7 +200,7 @@ impl<'src> ScopeRef<'src> {
         let Mem { heap, defs_bin, .. } = &mut *mem;
         heap.retain(|id, Scope { defs, .. }| {
             let retain = reachable.contains(id);
-            if !retain {
+            if !retain && defs.capacity() > 0 {
                 defs.clear();
                 defs_bin.push(mem::take(defs));
             }

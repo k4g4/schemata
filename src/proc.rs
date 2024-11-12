@@ -10,13 +10,13 @@ use std::{
     borrow::Cow,
     f64, fmt, iter,
     ops::{Add, Div, Mul, Sub},
-    ptr,
     rc::Rc,
     str,
 };
 
 #[derive(Clone)]
 pub enum Proc<'src> {
+    Compound(Rc<Compound<'src>>),
     ListManip(ListManip),
     Arith(Arith),
     Cmp(Cmp),
@@ -37,17 +37,13 @@ pub enum Proc<'src> {
     Newline,
     Error,
     StrApp,
-    Compound {
-        name: Option<&'src str>,
-        params: Rc<[&'src str]>,
-        parent: ScopeRef<'src>,
-        body: Rc<[Syn<'src>]>,
-    },
 }
 
 impl<'src> Proc<'src> {
     pub fn apply(&self, args: ItemsIter<'_, 'src>) -> Result<Item<'src>> {
         match self {
+            Self::Compound(compound) => compound.clone().apply(args),
+
             Self::ListManip(list_manip) => list_manip.apply(args),
 
             Self::Arith(arith) => arith.apply(args.try_into()?),
@@ -69,10 +65,9 @@ impl<'src> Proc<'src> {
                     (Item::Pair(Some(lhs)), Item::Pair(Some(rhs))) => {
                         Rc::as_ptr(lhs) == Rc::as_ptr(rhs)
                     }
-                    (
-                        Item::Proc(Self::Compound { params: lhs, .. }),
-                        Item::Proc(Self::Compound { params: rhs, .. }),
-                    ) => ptr::eq(Rc::as_ptr(lhs), Rc::as_ptr(rhs)),
+                    (Item::Proc(Self::Compound(lhs)), Item::Proc(Self::Compound(rhs))) => {
+                        Rc::as_ptr(lhs) == Rc::as_ptr(rhs)
+                    }
                     (Item::Proc(lhs), Item::Proc(rhs)) => format!("{lhs}") == format!("{rhs}"),
                     _ => false,
                 };
@@ -204,67 +199,6 @@ impl<'src> Proc<'src> {
                 .map(Cow::Owned)
                 .map(Rc::new)
                 .map(Item::String),
-
-            Self::Compound {
-                name,
-                params,
-                parent,
-                body,
-            } => {
-                let debug = globals::debug();
-                let scope = parent.new_local()?;
-                let mut args = args;
-
-                if debug {
-                    eprint!("{}(", name.unwrap_or(idents::LAMBDA));
-                }
-                let before_dot_len = params
-                    .iter()
-                    .position(|&param| param == ".")
-                    .unwrap_or(params.len());
-                let before_dot_iter = params[..before_dot_len].iter().enumerate();
-                for (i, &param) in before_dot_iter {
-                    if let Some(item) = args.next() {
-                        if debug {
-                            eprint!("{param}: {item}");
-                            if i != before_dot_len - 1 {
-                                eprint!(", ");
-                            }
-                        }
-                        scope.add(param, item.clone())?;
-                    } else {
-                        bail!("Expected {} argument(s), received {i}", before_dot_len);
-                    }
-                }
-                if before_dot_len < params.len() {
-                    let &rest_param = params.last().expect("dot is before last param");
-                    let rest =
-                        Item::from_items(args.cloned().map(Ok).collect::<Vec<_>>().into_iter())?;
-                    if debug {
-                        if before_dot_len != 0 {
-                            eprint!(", ");
-                        }
-                        eprint!("{rest_param}: {rest}");
-                    }
-                    scope.add(rest_param, rest)?;
-                } else {
-                    ensure!(
-                        args.next().is_none(),
-                        "Too many arguments for {self}, expected {}",
-                        params.len()
-                    );
-                }
-                if debug {
-                    eprintln!(") (Scope {scope:?})");
-                    eprintln!();
-                }
-
-                Ok(Item::Deferred {
-                    name: name.clone(),
-                    scope,
-                    body: body.clone(),
-                })
-            }
         }
     }
 }
@@ -272,6 +206,7 @@ impl<'src> Proc<'src> {
 impl fmt::Display for Proc<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Compound(compound) => write!(f, "{compound}"),
             Self::ListManip(list_manip) => write!(f, "{list_manip}"),
             Self::Arith(arith) => write!(f, "{arith}"),
             Self::Cmp(cmp) => write!(f, "{cmp}"),
@@ -292,10 +227,140 @@ impl fmt::Display for Proc<'_> {
             Self::Newline => write!(f, "<{}>", idents::NEWL),
             Self::Error => write!(f, "<{}>", idents::ERROR),
             Self::StrApp => write!(f, "<{}>", idents::STR_APP),
-            Self::Compound { name: None, .. } => write!(f, "<{}>", idents::LAMBDA),
-            Self::Compound {
-                name: Some(name), ..
-            } => write!(f, "<proc '{name}'>"),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Compound<'src> {
+    name: Option<&'src str>,
+    parent: ScopeRef<'src>,
+    params: Box<[&'src str]>,
+    body: Box<[Syn<'src>]>,
+}
+
+impl<'src> Compound<'src> {
+    pub fn new<'a>(
+        name: Option<&'src str>,
+        parent: ScopeRef<'src>,
+        params: impl Iterator<Item = &'a Syn<'src>> + Clone,
+        body: &'a [Syn<'src>],
+    ) -> Result<Rc<Self>>
+    where
+        'src: 'a,
+    {
+        ensure!(
+            !body.is_empty(),
+            "Empty body for <{}>",
+            name.unwrap_or(idents::LAMBDA)
+        );
+        let name_or_lambda = name.unwrap_or(idents::LAMBDA);
+        if let Some(Syn::Ident(duplicate)) = params
+            .clone()
+            .find(|param| params.clone().filter(|p| p == param).count() != 1)
+        {
+            bail!("Duplicate parameter '{duplicate}' specified for <{name_or_lambda}>");
+        }
+        if let Some(dot_pos) = params
+            .clone()
+            .position(|syn| matches!(syn, Syn::Ident(".")))
+        {
+            ensure!(
+                dot_pos == params.clone().count().wrapping_sub(2),
+                "Misplaced dot in signature in <{name_or_lambda}>"
+            );
+        }
+
+        let params = params
+            .map(|param| {
+                if let &Syn::Ident(ident) = param {
+                    Ok(ident)
+                } else {
+                    Err(anyhow!(
+                        "Unexpected parameter {param} in signature for <{name_or_lambda}>"
+                    ))
+                }
+            })
+            .collect::<Result<_>>()?;
+
+        Ok(Rc::new(Self {
+            name,
+            parent,
+            params,
+            body: body.into(),
+        }))
+    }
+
+    pub fn parent_scope(&self) -> ScopeRef<'src> {
+        self.parent
+    }
+
+    pub fn body(&self) -> &[Syn<'src>] {
+        &self.body
+    }
+
+    fn apply(self: Rc<Self>, args: ItemsIter<'_, 'src>) -> Result<Item<'src>> {
+        let debug = globals::debug();
+        let scope = self.parent.new_local()?;
+        let mut args = args;
+
+        if debug {
+            eprint!("{}(", self.name.unwrap_or(idents::LAMBDA));
+        }
+        let before_dot_len = self
+            .params
+            .iter()
+            .position(|&param| param == ".")
+            .unwrap_or(self.params.len());
+        let before_dot_iter = self.params[..before_dot_len].iter().enumerate();
+        for (i, param) in before_dot_iter {
+            if let Some(item) = args.next() {
+                if debug {
+                    eprint!("{param}: {item}");
+                    if i != before_dot_len - 1 {
+                        eprint!(", ");
+                    }
+                }
+                scope.add(param, item.clone())?;
+            } else {
+                bail!("Expected {} argument(s), received {i}", before_dot_len);
+            }
+        }
+        if before_dot_len < self.params.len() {
+            let &rest_param = self.params.last().expect("dot is before last param");
+            let rest = Item::from_items(args.cloned().map(Ok).collect::<Vec<_>>().into_iter())?;
+            if debug {
+                if before_dot_len != 0 {
+                    eprint!(", ");
+                }
+                eprint!("{rest_param}: {rest}");
+            }
+            scope.add(rest_param, rest)?;
+        } else {
+            ensure!(
+                args.next().is_none(),
+                "Too many arguments for {self}, expected {}",
+                self.params.len()
+            );
+        }
+        if debug {
+            eprintln!(") (Scope {scope:?})");
+            eprintln!();
+        }
+
+        Ok(Item::Deferred {
+            scope,
+            compound: self,
+        })
+    }
+}
+
+impl fmt::Display for Compound<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(name) = self.name {
+            write!(f, "<proc '{name}'>")
+        } else {
+            write!(f, "<{}>", idents::LAMBDA)
         }
     }
 }
